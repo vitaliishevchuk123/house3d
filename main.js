@@ -241,6 +241,9 @@ houseGroup.add(roof);
   box(0.1, h, d + 2 * o, mat.foundation, w + o, h / 2 - 0.1, d / 2, houseGroup);
 })();
 
+// плитка-сходинка біля дверей котельні (східна стіна)
+box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.35, houseGroup);
+
 // ґанок: настил, білі колони, перила, дашок, сходинка
 (function buildPorch() {
   const x0 = 5.0, x1 = 11.4, z0 = 9.2, z1 = 11.4, deckTop = 0.3;
