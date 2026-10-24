@@ -225,6 +225,23 @@ function oakTexture(tile = false, light = false) {
   return t;
 }
 const oak = oakTexture(), oakTile = oakTexture(true);
+// шахова плитка 30 x 30 см, чорна й тепло-біла; текстура 2 x 2 клітинки = 0.6 м
+const checker = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
+    g.fillStyle = (i + j) % 2 ? '#1c1e1f' : '#f2f0e8';
+    g.fillRect(i * 128, j * 128, 128, 128);
+  }
+  g.strokeStyle = 'rgba(120,120,115,.7)'; g.lineWidth = 3;                      // шви
+  g.strokeRect(0, 0, 128, 128); g.strokeRect(128, 0, 128, 128); g.strokeRect(0, 128, 128, 128); g.strokeRect(128, 128, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+})();
 const doorGaps = (axis, c) => {
   const gaps = [];
   for (const w of walls) {
@@ -303,20 +320,23 @@ function clad(f) {
 
 for (const f of floors) {
   const w = f.x1 - f.x0, d = f.z1 - f.z0;
-  const t = (f.tile ? oakTile : oak).clone();
+  const t = (f.checker ? checker : f.tile ? oakTile : oak).clone();
   t.needsUpdate = true;
-  t.repeat.set(w / 2.4, d / 2.4);
+  const sc = f.checker ? 0.6 : 2.4;
+  t.repeat.set(w / sc, d / sc);
+  t.offset.set(f.x0 / sc, -f.z1 / sc);                                 // світове вирівнювання: шви й дошки продовжуються між ділянками
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
-    new THREE.MeshStandardMaterial({ map: t, roughness: f.tile ? 0.35 : 0.55, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    new THREE.MeshStandardMaterial({ map: t, roughness: f.checker ? 0.25 : f.tile ? 0.35 : 0.55, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   m.rotation.x = -Math.PI / 2;
   m.position.set((f.x0 + f.x1) / 2, FLOOR_Y + 0.002, (f.z0 + f.z1) / 2);
   m.receiveShadow = true;
   houseGroup.add(m);
   if (f.tile) { clad(f); continue; }
-  skirting('x', f.z0, f.x0, f.x1, 1);
-  skirting('x', f.z1, f.x0, f.x1, -1);
-  skirting('z', f.x0, f.z0, f.z1, 1);
-  skirting('z', f.x1, f.z0, f.z1, -1);
+  const j = f.join || [];
+  if (!j.includes('z0')) skirting('x', f.z0, f.x0, f.x1, 1);
+  if (!j.includes('z1')) skirting('x', f.z1, f.x0, f.x1, -1);
+  if (!j.includes('x0')) skirting('z', f.x0, f.z0, f.z1, 1);
+  if (!j.includes('x1')) skirting('z', f.x1, f.z0, f.z1, -1);
 }
 
 // дах (двосхилий, гребінь уздовж x)
@@ -496,7 +516,19 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
   g.add(tv);
   box(0.2, 0.2, 0.012, dark, 0, 0, -0.026, tv);                                // VESA-плита
   box(1.45, 0.84, 0.04, dark, 0, 0, 0, tv);                                    // корпус
-  box(1.42, 0.81, 0.003, screen, 0, 0, 0.0215, tv);                            // екран
+  // Xiaomi: майже безрамковий екран, тонка верхня й боки рамка, підборіддя знизу з логотипом «mi»
+  box(1.434, 0.795, 0.003, screen, 0, 0.0145, 0.0215, tv);                       // екран
+  const lc = document.createElement('canvas');
+  lc.width = lc.height = 128;
+  const lg = lc.getContext('2d');
+  lg.fillStyle = '#ff6900'; lg.beginPath(); lg.roundRect(8, 8, 112, 112, 26); lg.fill();   // помаранчевий квадрат Xiaomi
+  lg.fillStyle = '#ffffff'; lg.font = 'bold 74px Arial, sans-serif'; lg.textAlign = 'center'; lg.textBaseline = 'middle';
+  lg.fillText('mi', 64, 70);
+  const ltex = new THREE.CanvasTexture(lc);
+  ltex.colorSpace = THREE.SRGBColorSpace;
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(0.024, 0.024), new THREE.MeshBasicMaterial({ map: ltex, transparent: true }));
+  logo.position.set(0, -0.402, 0.0235);
+  tv.add(logo);
 
   // шкіряне крісло-реклайнер (як у серіалі «Друзі») і кутовий тканинний диван: темно-коричнева шкіра, товсті підлокітники, високі спинки з валиком.
   const leather = new THREE.MeshStandardMaterial({ color: 0x35221a, roughness: 0.45 });
@@ -1085,3 +1117,430 @@ renderer.setAnimationLoop(() => {
   l.position.set(x, 2.65, z);
   houseGroup.add(l);
 });
+
+// люстра по центру кухні-вітальні: підвісна біла півсфера на темному шнурі; ховається разом з дахом/стелею (R)
+(function buildPendant() {
+  const x = (0.2 + 8.925) / 2, z = (4.575 + 8.8) / 2;
+  const grp = new THREE.Group();
+  grp.position.set(x, 0, z);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.5 });
+  const mesh = (geo, m, y) => { const o = new THREE.Mesh(geo, m); o.position.y = y; grp.add(o); return o; };
+  mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.015, 24), dark, -ceilingDrop - 0.008);                 // накладка на стелі
+  mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.22, 8), dark, -ceilingDrop - 0.12);                  // шнур
+  const shade = mesh(new THREE.SphereGeometry(0.27, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.5, side: THREE.DoubleSide, emissive: 0xfff1dc, emissiveIntensity: 0.25 }), -0.53);
+  shade.castShadow = false;
+  mesh(new THREE.TorusGeometry(0.27, 0.007, 8, 48), new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.7, roughness: 0.3 }), -0.53).rotation.x = Math.PI / 2; // золотий кант
+  mesh(new THREE.SphereGeometry(0.05, 16, 12), new THREE.MeshStandardMaterial({ color: 0xfff6e0, emissive: 0xffe9bd, emissiveIntensity: 1 }), -0.5); // лампа
+  const light = new THREE.PointLight(0xfff1dc, 10, 9, 1.6);
+  light.position.y = -0.6;
+  grp.add(light);
+  roof.add(grp);                                                                                        // роф-група: y=0 — верх стін
+})();
+
+// кавомашина Philips (чорна, автоматична) на стільниці в кутку кухні біля мийки
+(function buildCoffeeMachine() {
+  const g = new THREE.Group();
+  g.position.set(8.45, FLOOR_Y + 0.89, 4.575 + 0.215);          // верх стільниці = 0.89 м, притулена до північної стіни
+  houseGroup.add(g);
+  const black = new THREE.MeshStandardMaterial({ color: 0x0f1012, roughness: 0.22, metalness: 0.1 });
+  const matte = new THREE.MeshStandardMaterial({ color: 0x1b1d1f, roughness: 0.6 });
+  const rb = (w, h, d, r, m, x, y, z) => {
+    const o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 4, r), m);
+    o.position.set(x, y, z);
+    o.castShadow = true;
+    g.add(o);
+    return o;
+  };
+  rb(0.246, 0.34, 0.40, 0.02, black, 0, 0.2, 0);                  // корпус
+  rb(0.2, 0.03, 0.2, 0.012, matte, 0, 0.385, -0.08);              // кришка бункера для зерна
+  rb(0.21, 0.03, 0.15, 0.008, matte, 0, 0.015, 0.05);             // піддон
+  rb(0.14, 0.11, 0.06, 0.01, matte, 0, 0.17, 0.2);                // ніша виходу кави
+  rb(0.04, 0.05, 0.035, 0.008, black, 0, 0.19, 0.21);             // носик
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.028, 0.065, 20), new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.3 }));
+  cup.position.set(0, 0.062, 0.2);                                // біла чашка на піддоні
+  g.add(cup);
+  const disp = new THREE.Mesh(new THREE.PlaneGeometry(0.075, 0.032), new THREE.MeshStandardMaterial({ color: 0x1a2a3a, emissive: 0x7fc4ff, emissiveIntensity: 0.9 }));
+  disp.position.set(0, 0.327, 0.2 + 0.001);                        // дисплей
+  g.add(disp);
+  for (const x of [-0.07, 0.07]) {                                // кнопки
+    const b = new THREE.Mesh(new THREE.CircleGeometry(0.012, 16), new THREE.MeshStandardMaterial({ color: 0x555a60, emissive: 0x1a1d20 }));
+    b.position.set(x, 0.327, 0.2 + 0.001);
+    g.add(b);
+  }
+  // контейнер для молока (як LatteGo): прозорий резервуар з молоком, чорна кришка й важіль, кріпиться спереду над виходом кави
+  const clear = new THREE.MeshStandardMaterial({ color: 0xdfeaee, transparent: true, opacity: 0.32, roughness: 0.08, depthWrite: false });
+  const milk = new THREE.MeshStandardMaterial({ color: 0xfbfaf4, roughness: 0.35 });
+  rb(0.115, 0.17, 0.07, 0.012, clear, 0, 0.195, 0.2 + 0.038);   // резервуар
+  rb(0.1, 0.085, 0.056, 0.01, milk, 0, 0.152, 0.2 + 0.038);     // молоко всередині
+  rb(0.12, 0.022, 0.075, 0.008, matte, 0, 0.289, 0.2 + 0.038);  // кришка
+  rb(0.03, 0.014, 0.03, 0.006, matte, 0.035, 0.304, 0.2 + 0.04); // важіль на кришці
+  const c = document.createElement('canvas');                     // напис PHILIPS
+  c.width = 256; c.height = 48;
+  const t = c.getContext('2d');
+  t.fillStyle = '#e8e8e8'; t.font = 'bold 34px Arial, sans-serif'; t.textAlign = 'center'; t.textBaseline = 'middle';
+  t.fillText('PHILIPS', 128, 26);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.019), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  logo.position.set(0, 0.357, 0.2 + 0.001);
+  g.add(logo);
+})();
+
+// стельові плінтуси (карнизи): білі, 4 x 2.5 см, по периметру кожної кімнати зі стелею; ховаються разом зі стелею (R)
+(function buildCornice() {
+  const H = 0.04, T = 0.025, y = -ceilingDrop - H / 2;
+  const add = (w, d, x, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, H, d), mat.white);
+    m.position.set(x, y, z);
+    roof.add(m);
+  };
+  for (const f of floors) {
+    const w = f.x1 - f.x0, d = f.z1 - f.z0;
+    const j = f.join || [];
+    if (!j.includes('z0')) add(w, T, (f.x0 + f.x1) / 2, f.z0 + T / 2);
+    if (!j.includes('z1')) add(w, T, (f.x0 + f.x1) / 2, f.z1 - T / 2);
+    if (!j.includes('x0')) add(T, d - 2 * T, f.x0 + T / 2, (f.z0 + f.z1) / 2);
+    if (!j.includes('x1')) add(T, d - 2 * T, f.x1 - T / 2, (f.z0 + f.z1) / 2);
+  }
+})();
+
+// мала спальня (Кімната 1): двоспальне ліжко 160 x 200 узголів'ям до західної стіни (ліворуч від дверей) + дві тумбочки
+(function buildBedroom1() {
+  const g = houseGroup, base = FLOOR_Y;
+  const oat = new THREE.MeshStandardMaterial({ color: 0xb9b0a2, roughness: 0.97 });
+  const linen = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.95 });
+  const duvetM = new THREE.MeshStandardMaterial({ color: 0xe8e4d8, roughness: 0.97 });
+  const throwM = new THREE.MeshStandardMaterial({ color: 0x65777a, roughness: 0.98 });   // плед у колір фасаду
+  const tex = oakTexture(false, true);
+  tex.repeat.set(0.8, 0.5);
+  const wood = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 });
+  const rbx = (m, x0, x1, y0, y1, z0, z1, r, rotZ = 0) => {
+    const o = new THREE.Mesh(new RoundedBoxGeometry(x1 - x0, y1 - y0, z1 - z0, 5, r), m);
+    o.position.set((x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2);
+    o.rotation.z = rotZ;
+    o.castShadow = o.receiveShadow = true;
+    g.add(o);
+    return o;
+  };
+  const blk = (m, x0, x1, y0, y1, z0, z1) =>
+    box(x1 - x0, y1 - y0, z1 - z0, m, (x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2, g);
+
+  const zc = 2.31, W = 1.6, z0 = zc - W / 2, z1 = zc + W / 2;       // по центру кімнати вздовж стіни
+  const xw = 0.2;                                                  // західна стіна (чиста поверхня)
+  rbx(oat, xw, xw + 0.12, 0.12, 1.1, z0 - 0.12, z1 + 0.12, 0.04);   // м'яке узголів'я
+  blk(wood, xw + 0.1, xw + 2.02, 0.1, 0.32, z0 - 0.01, z1 + 0.01);  // рама
+  for (const x of [xw + 0.15, xw + 1.97]) for (const z of [z0 + 0.04, z1 - 0.04]) blk(wood, x - 0.03, x + 0.03, 0, 0.1, z - 0.03, z + 0.03); // ніжки
+  rbx(linen, xw + 0.12, xw + 2.02, 0.32, 0.55, z0, z1, 0.06);       // матрац із простирадлом
+  rbx(duvetM, xw + 0.6, xw + 2.04, 0.54, 0.62, z0 - 0.04, z1 + 0.04, 0.05);  // ковдра, звисає з боків
+  rbx(duvetM, xw + 0.6, xw + 2.04, 0.36, 0.56, z0 - 0.045, z0 - 0.02, 0.01);
+  rbx(duvetM, xw + 0.6, xw + 2.04, 0.36, 0.56, z1 + 0.02, z1 + 0.045, 0.01);
+  rbx(throwM, xw + 1.5, xw + 1.8, 0.62, 0.65, z0 - 0.05, z1 + 0.05, 0.015);  // плед упоперек ніг
+  for (const z of [zc - 0.4, zc + 0.4]) rbx(linen, xw + 0.2, xw + 0.7, 0.55, 0.72, z - 0.26, z + 0.26, 0.08); // подушки
+  addCollider(xw, xw + 2.04, z0 - 0.05, z1 + 0.05);
+
+  // тумбочки 0.4 x 0.4 x 0.5 по боках узголів'я
+  const stand = (zz) => {
+    const sx0 = xw + 0.01, sx1 = sx0 + 0.4, sz0 = zz - 0.2, sz1 = zz + 0.2;
+    blk(wood, sx0, sx1, 0.12, 0.5, sz0, sz1);
+    blk(linen, sx0 + 0.02, sx1 - 0.005, 0.18, 0.28, sz1, sz1 + 0.006);                 // шухляда
+    blk(linen, sx0 + 0.02, sx1 - 0.005, 0.31, 0.43, sz1, sz1 + 0.006);
+    for (const x of [sx0 + 0.04, sx1 - 0.04]) for (const z of [sz0 + 0.04, sz1 - 0.04]) blk(wood, x - 0.02, x + 0.02, 0, 0.12, z - 0.02, z + 0.02);
+    addCollider(sx0, sx1, sz0, sz1);
+  };
+  stand(z0 - 0.12 - 0.22);
+  stand(z1 + 0.12 + 0.22);
+})();
+
+// мала спальня: два шафи-пенали в кутах біля західної стіни (окремо для нього й для неї) + настільні лампи на тумбочках
+(function buildBedroom1Extras() {
+  const g = houseGroup, base = FLOOR_Y;
+  const white = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.45 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.5 });
+  const tex = oakTexture(false, true);
+  tex.repeat.set(0.8, 0.5);
+  const wood = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 });
+  const blk = (m, x0, x1, y0, y1, z0, z1) =>
+    box(x1 - x0, y1 - y0, z1 - z0, m, (x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2, g);
+
+  // пенал 0.6 x 0.55 x 2.5: однодверний, білий фасад, світлий цоколь, довга вертикальна ручка, верхня антресоль
+  const xw = 0.2, D = 0.55, W = 0.6, H = 2.5;
+  const pencil = (za, zb, handleSide) => {
+    const z0 = Math.min(za, zb), z1 = Math.max(za, zb);
+    blk(wood, xw, xw + D - 0.02, 0, 0.1, z0 + 0.02, z1 - 0.02);                // цоколь
+    blk(white, xw, xw + D, 0.1, H, z0, z1);                                    // корпус
+    const fx = xw + D;
+    blk(dark, fx, fx + 0.004, 1.9, 1.904, z0, z1);                             // шов антресолі
+    const hz = handleSide > 0 ? z1 - 0.045 : z0 + 0.035;                         // одна вертикальна ручка з боку ліжка
+    blk(dark, fx, fx + 0.02, 1.0, 1.4, hz, hz + 0.01);
+    addCollider(xw, xw + D, z0, z1);
+  };
+  pencil(0.2, 0.2 + W, +1);          // північний (біля вікна), ручка з боку ліжка
+  pencil(4.425 - W, 4.425, -1);      // південний (біля перегородки з вітальнею), ручка з боку ліжка
+
+  // настільні лампи на тумбочках (центри z = 1.17 і 3.45, верх тумбочки 0.5 м)
+  const lampBase = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.3 });
+  const shadeM = new THREE.MeshStandardMaterial({ color: 0xf6efe0, emissive: 0xffe2b0, emissiveIntensity: 0.55, roughness: 0.9, side: THREE.DoubleSide });
+  for (const z of [1.17, 3.45]) {
+    const x = xw + 0.01 + 0.2;
+    const lamp = new THREE.Group();
+    lamp.position.set(x, base + 0.5, z);
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.07, 20, 14), lampBase);          // керамічна куля
+    b.scale.y = 1.25; b.position.y = 0.09; lamp.add(b);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.1, 10), dark);
+    neck.position.y = 0.22; lamp.add(neck);
+    const s = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.2, 28, 1, true), shadeM); // абажур-конус
+    s.position.y = 0.3; lamp.add(s);
+    const light = new THREE.PointLight(0xffd9a0, 1.6, 3.2, 1.8);
+    light.position.y = 0.3;
+    lamp.add(light);
+    g.add(lamp);
+  }
+})();
+
+// мала спальня: робоче місце в північно-східному куті — стіл 1.6 x 0.7, ультраширокий вигнутий монітор 34",
+// ноутбук, клавіатура з мишею, дві колонки і чорне геймерське крісло
+(function buildDesk() {
+  const g = houseGroup, base = FLOOR_Y;
+  const black = new THREE.MeshStandardMaterial({ color: 0x0f1012, roughness: 0.45 });
+  const matte = new THREE.MeshStandardMaterial({ color: 0x1b1d1f, roughness: 0.7 });
+  const grey = new THREE.MeshStandardMaterial({ color: 0x3a3d40, roughness: 0.6 });
+  const silver = new THREE.MeshStandardMaterial({ color: 0xb8bcc0, metalness: 0.6, roughness: 0.35 });
+  const tex = oakTexture(false, true);
+  tex.repeat.set(0.8, 0.5);
+  const wood = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 });
+  const rb = (m, w, h, d, r, x, y, z, parent = g) => {
+    const o = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, r), m);
+    o.position.set(x, y, z);
+    o.castShadow = o.receiveShadow = true;
+    parent.add(o);
+    return o;
+  };
+  const bx = (m, w, h, d, x, y, z, parent = g) => {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    o.position.set(x, y, z);
+    o.castShadow = o.receiveShadow = true;
+    parent.add(o);
+    return o;
+  };
+  const Y0 = base;
+
+  // --- стіл: світла стільниця, чорні металеві ніжки, біля північної стіни, правий край біля перегородки ---
+  const dx0 = 3.1, dx1 = 4.7, dz0 = 0.2, dz1 = 0.9, TY = 0.75;
+  bx(wood, dx1 - dx0, 0.03, dz1 - dz0, (dx0 + dx1) / 2, Y0 + TY - 0.015, (dz0 + dz1) / 2);
+  for (const x of [dx0 + 0.06, dx1 - 0.06]) {
+    bx(black, 0.04, TY - 0.03, 0.04, x, Y0 + (TY - 0.03) / 2, dz0 + 0.06);
+    bx(black, 0.04, TY - 0.03, 0.04, x, Y0 + (TY - 0.03) / 2, dz1 - 0.06);
+    bx(black, 0.03, 0.03, dz1 - dz0 - 0.1, x, Y0 + 0.12, (dz0 + dz1) / 2);
+  }
+  bx(black, dx1 - dx0 - 0.12, 0.03, 0.03, (dx0 + dx1) / 2, Y0 + TY - 0.06, dz1 - 0.07);
+  addCollider(dx0, dx1, dz0, dz1);
+
+  // --- монітор 34" 21:9 вигнутий, центр x = 4.1 ---
+  const mx = 4.1, mzc = 0.37, my = Y0 + TY + 0.24, R = 1.5, mw = 0.8, mh = 0.34;
+  const arc = mw / R;
+  const sc = document.createElement('canvas');
+  sc.width = 1024; sc.height = 436;
+  const sg = sc.getContext('2d');
+  const grad = sg.createLinearGradient(0, 0, 1024, 436);
+  grad.addColorStop(0, '#0e2a4a'); grad.addColorStop(0.5, '#2b4f8f'); grad.addColorStop(1, '#13203f');
+  sg.fillStyle = grad; sg.fillRect(0, 0, 1024, 436);
+  sg.fillStyle = 'rgba(255,255,255,.1)'; sg.fillRect(80, 60, 360, 240); sg.fillRect(480, 90, 440, 260);
+  sg.fillStyle = 'rgba(10,15,30,.85)'; sg.fillRect(0, 404, 1024, 32);
+  const stex = new THREE.CanvasTexture(sc);
+  stex.colorSpace = THREE.SRGBColorSpace;
+  stex.wrapS = THREE.RepeatWrapping; stex.repeat.x = -1; stex.offset.x = 1;      // напрям кута циліндра дзеркалить U
+  const screenM = new THREE.MeshStandardMaterial({ map: stex, emissive: 0xffffff, emissiveMap: stex, emissiveIntensity: 0.75, roughness: 0.3, side: THREE.DoubleSide });
+  const screen = new THREE.Mesh(new THREE.CylinderGeometry(R, R, mh, 40, 1, true, Math.PI - arc / 2, arc), screenM);
+  screen.position.set(mx, my, mzc + R);
+  g.add(screen);
+  const bezel = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.006, R + 0.006, mh + 0.016, 40, 1, true, Math.PI - (arc + 0.016 / R) / 2, arc + 0.016 / R),
+    new THREE.MeshStandardMaterial({ color: 0x0f1012, roughness: 0.45, side: THREE.DoubleSide }));
+  bezel.position.set(mx, my, mzc + R);
+  g.add(bezel);
+  rb(black, 0.5, 0.2, 0.05, 0.02, mx, my, mzc - 0.04);
+  bx(grey, 0.05, 0.22, 0.03, mx, my - 0.22, mzc - 0.04);
+  rb(grey, 0.3, 0.012, 0.19, 0.005, mx, Y0 + TY + 0.006, mzc + 0.02);
+
+  // --- біла клавіатура з RGB-підсвіткою + чорна миша на килимку ---
+  const kc = document.createElement('canvas'), ke = document.createElement('canvas');   // колір клавіш і карта світіння
+  kc.width = ke.width = 512; kc.height = ke.height = 160;
+  const kg = kc.getContext('2d'), kge = ke.getContext('2d');
+  kg.fillStyle = '#dedcd4'; kg.fillRect(0, 0, 512, 160);
+  kge.fillStyle = '#000'; kge.fillRect(0, 0, 512, 160);
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 16; c++) {
+    const x = 10 + c * 31, y = 12 + r * 28, hue = (c * 22 + r * 12) % 360;                  // хвиля кольору по клавішах
+    kg.fillStyle = '#fbfaf6'; kg.fillRect(x, y, 26, 22);
+    kg.fillStyle = 'hsl(' + hue + ',90%,62%)'; kg.fillRect(x + 8, y + 8, 10, 5);             // кольорова літера
+    kge.fillStyle = 'hsl(' + hue + ',100%,55%)';
+    kge.fillRect(x - 3, y - 3, 32, 3); kge.fillRect(x - 3, y + 22, 32, 3);                    // світіння між клавішами
+    kge.fillRect(x - 3, y, 3, 22); kge.fillRect(x + 26, y, 3, 22);
+    kge.fillRect(x + 8, y + 8, 10, 5);
+  }
+  const ktex = new THREE.CanvasTexture(kc), ketex = new THREE.CanvasTexture(ke);
+  ktex.colorSpace = ketex.colorSpace = THREE.SRGBColorSpace;
+  rb(new THREE.MeshStandardMaterial({ color: 0xeeece4, roughness: 0.5 }), 0.44, 0.022, 0.14, 0.008, mx, Y0 + TY + 0.011, 0.72);   // білий корпус клавіатури
+  const ktop = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.13), new THREE.MeshStandardMaterial({ map: ktex, emissive: 0xffffff, emissiveMap: ketex, emissiveIntensity: 1.1, roughness: 0.6 }));
+  ktop.rotation.x = -Math.PI / 2; ktop.position.set(mx, Y0 + TY + 0.0225, 0.72); g.add(ktop);
+  rb(matte, 0.3, 0.003, 0.24, 0.001, mx + 0.34, Y0 + TY + 0.0015, 0.72);
+  rb(black, 0.065, 0.03, 0.11, 0.02, mx + 0.34, Y0 + TY + 0.017, 0.72);
+
+  // --- ноутбук зліва: сріблястий, відкритий, під кутом ---
+  // стоїть на алюмінієвій підставці з нахилом і трохи розвернутий до людини в кріслі (в бік клавіатури)
+  const holder = new THREE.Group();
+  holder.position.set(3.3, Y0 + TY, 0.6);
+  holder.rotation.y = 0.5;
+  g.add(holder);
+  for (const sx of [-1, 1]) {
+    bx(silver, 0.012, 0.1, 0.22, sx * 0.13, 0.05, 0, holder);                                    // бічні опори
+    bx(silver, 0.012, 0.012, 0.28, sx * 0.13, 0.006, 0, holder);                                 // лижі на столі
+  }
+  bx(silver, 0.3, 0.012, 0.22, 0, 0.088, 0, holder).rotation.x = 0.2;                            // похила площадка
+  bx(silver, 0.3, 0.02, 0.012, 0, 0.1, 0.115, holder);                                           // упор спереду
+  const lap = new THREE.Group();
+  lap.position.set(0, 0.098, 0);
+  lap.rotation.x = 0.2;
+  holder.add(lap);
+  rb(silver, 0.32, 0.014, 0.22, 0.005, 0, 0.007, 0, lap);
+  const lkc = document.createElement('canvas'), lke = document.createElement('canvas');
+  lkc.width = lke.width = 290; lkc.height = lke.height = 100;
+  const lkg = lkc.getContext('2d'), lkge = lke.getContext('2d');
+  lkg.fillStyle = '#101113'; lkg.fillRect(0, 0, 290, 100);
+  lkge.fillStyle = '#000'; lkge.fillRect(0, 0, 290, 100);
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 15; c++) {
+    const x = 6 + c * 18.6, y = 6 + r * 18;
+    lkg.fillStyle = '#1d1f22'; lkg.fillRect(x, y, 16, 14);
+    lkge.fillStyle = '#ffffff';
+    lkge.fillRect(x - 1.2, y - 1.2, 18.4, 1.2); lkge.fillRect(x - 1.2, y + 14, 18.4, 1.2);   // біла підсвітка навколо клавіш
+    lkge.fillRect(x + 5, y + 5, 6, 3);                                                          // літера
+  }
+  const lktex = new THREE.CanvasTexture(lkc), lketex = new THREE.CanvasTexture(lke);
+  lktex.colorSpace = lketex.colorSpace = THREE.SRGBColorSpace;
+  rb(matte, 0.29, 0.002, 0.1, 0.001, 0, 0.0145, 0.03, lap);
+  const lkb = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.097), new THREE.MeshStandardMaterial({ map: lktex, emissive: 0xffffff, emissiveMap: lketex, emissiveIntensity: 0.9, roughness: 0.6 }));
+  lkb.rotation.x = -Math.PI / 2; lkb.position.set(0, 0.0166, 0.03); lap.add(lkb);
+  const lid = new THREE.Group();
+  lid.position.set(0, 0.014, -0.11);
+  lid.rotation.x = -0.28;
+  lap.add(lid);
+  rb(silver, 0.32, 0.21, 0.008, 0.004, 0, 0.105, 0, lid);
+  const lscreen = new THREE.Mesh(new THREE.PlaneGeometry(0.30, 0.19), new THREE.MeshStandardMaterial({ map: stex, emissive: 0xffffff, emissiveMap: stex, emissiveIntensity: 0.5 }));
+  lscreen.position.set(0, 0.105, 0.0045);
+  lid.add(lscreen);
+
+  // --- колонки: дві білі кулі-«м'ячики» по краях монітора, на низьких білих підставках ---
+  const ball = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.35 });
+  const grill = new THREE.MeshStandardMaterial({ color: 0xc9c6bc, roughness: 0.8 });
+  const whiteBase = new THREE.MeshStandardMaterial({ color: 0xe6e3da, roughness: 0.5 });
+  for (const x of [3.6, 4.6]) {
+    const baseM = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.012, 20), whiteBase);
+    baseM.position.set(x, Y0 + TY + 0.006, 0.34); g.add(baseM);
+    const sp = new THREE.Mesh(new THREE.SphereGeometry(0.075, 28, 20), ball);
+    sp.position.set(x, Y0 + TY + 0.012 + 0.075, 0.34); sp.castShadow = true; g.add(sp);
+    const drv = new THREE.Mesh(new THREE.CircleGeometry(0.04, 24), grill);                       // динамік спереду
+    drv.position.set(x, Y0 + TY + 0.092, 0.34 + 0.0745); g.add(drv);
+    const tw = new THREE.Mesh(new THREE.CircleGeometry(0.015, 16), grill);
+    tw.position.set(x, Y0 + TY + 0.145, 0.34 + 0.07); tw.rotation.x = -0.4; g.add(tw);
+  }
+
+  // --- геймерське крісло: чорне, спинка-«ківш», підголівник, підлокітники, 5-променева основа з колісцями ---
+  const chair = new THREE.Group();
+  chair.position.set(4.05, Y0, 1.45);
+  chair.rotation.y = 0.12;
+  g.add(chair);
+  const cyl = (r1, r2, h, y, m) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, 14), m); o.position.y = y; o.castShadow = true; chair.add(o); return o; };
+  cyl(0.028, 0.034, 0.3, 0.2, grey);
+  for (let i = 0; i < 5; i++) {
+    const a = i * Math.PI * 2 / 5;
+    const arm = bx(black, 0.3, 0.03, 0.045, Math.cos(a) * 0.15, 0.065, Math.sin(a) * 0.15, chair);
+    arm.rotation.y = -a;
+    const wh = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), matte);
+    wh.position.set(Math.cos(a) * 0.29, 0.032, Math.sin(a) * 0.29);
+    chair.add(wh);
+  }
+  rb(black, 0.32, 0.05, 0.26, 0.02, 0, 0.36, 0, chair);
+  rb(black, 0.5, 0.09, 0.5, 0.04, 0, 0.45, 0, chair);
+  for (const s of [-1, 1]) rb(grey, 0.07, 0.11, 0.46, 0.03, s * 0.215, 0.475, 0, chair);
+  const back = new THREE.Group();
+  back.position.set(0, 0.5, 0.22);
+  back.rotation.x = 0.12;
+  chair.add(back);
+  rb(black, 0.46, 0.78, 0.09, 0.045, 0, 0.45, 0, back);
+  for (const s of [-1, 1]) rb(grey, 0.07, 0.62, 0.12, 0.035, s * 0.235, 0.38, -0.02, back);
+  rb(black, 0.26, 0.13, 0.07, 0.04, 0, 0.95, -0.065, back);
+  rb(black, 0.3, 0.14, 0.07, 0.04, 0, 0.3, -0.07, back);
+  // з'єднувачі: дві металеві стійки підголівника в спинку і дві Г-подібні скоби від механізму сидіння до низу спинки
+  for (const sx of [-0.055, 0.055]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.14, 10), grey);
+    post.position.set(sx, 0.86, -0.05);
+    back.add(post);
+  }
+  for (const sx of [-0.1, 0.1]) {
+    bx(grey, 0.035, 0.035, 0.24, sx, 0.4, 0.14, chair);          // горизонтальна частина під сидінням
+    bx(grey, 0.035, 0.24, 0.035, sx, 0.5, 0.26, chair);          // вертикальна частина за краєм сидіння, входить у спинку
+  }
+  for (const s of [-1, 1]) {
+    bx(matte, 0.04, 0.24, 0.05, s * 0.29, 0.62, 0.08, chair);
+    rb(matte, 0.075, 0.035, 0.25, 0.012, s * 0.29, 0.75, -0.03, chair);
+  }
+  addCollider(4.05 - 0.33, 4.05 + 0.33, 1.45 - 0.33, 1.45 + 0.4);
+})();
+
+// мала спальня: просте біле дитяче ліжечко-колиска 124 x 66,
+// біля південної стіни, західніше дверей (біля ніг ліжка)
+(function buildCrib() {
+  const g = houseGroup, base = FLOOR_Y;
+  const white = new THREE.MeshStandardMaterial({ color: 0xf7f6f2, roughness: 0.45 });
+  const shade = new THREE.MeshStandardMaterial({ color: 0xe6e4de, roughness: 0.6 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xd8dadc, metalness: 0.7, roughness: 0.35 });
+  const mattressM = new THREE.MeshStandardMaterial({ color: 0xd6c4a6, roughness: 0.97 });   // матрац застелений бежевим простирадлом
+  const stripeM = new THREE.MeshStandardMaterial({ color: 0xc9b690, roughness: 0.97 });
+  const pillowM = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, roughness: 0.97 });
+  const crib = new THREE.Group();
+  crib.position.set(2.95, base, 4.075);              // довга вісь уздовж x, борт «ззаду» біля стіни
+  g.add(crib);
+  const bx = (m, w, h, d, x, y, z, parent = crib) => {
+    const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+    o.position.set(x, y, z);
+    o.castShadow = o.receiveShadow = true;
+    parent.add(o);
+    return o;
+  };
+  const L = 1.24, W = 0.66, X = L / 2, Z = W / 2, P = 0.04;                        // габарити й товщина стійок
+  const yBody = 0.3, yTop = 0.86, yEnd = 1.0;                                       // низ кузова, верх бортів, верх узголів'їв
+
+  // --- проста біла колиска: ніжки-стійки з нижніми поперечками для жорсткості ---
+  for (const sx of [-1, 1]) bx(white, 0.035, 0.035, W - 2 * P, sx * (X - 0.02), 0.08, 0);       // нижні поперечки торців
+  for (const sz of [-1, 1]) bx(white, L - 2 * P, 0.03, 0.03, 0, 0.08, sz * (Z - 0.02));          // нижні рейки довгих боків
+
+  // --- кузов: стійки, дно-решітка, матрац ---
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const top = sx < 0 ? yEnd : yEnd - 0.1;                                                       // одне узголів'я вище, друге нижче
+    bx(white, P, top, P, sx * (X - P / 2), top / 2, sz * (Z - P / 2));                // стійка від підлоги до верху
+  }
+  bx(white, L - 2 * P, 0.02, W - 2 * P, 0, yBody + 0.1, 0);                                       // основа
+  for (let i = 0; i < 16; i++) bx(shade, 0.045, 0.012, W - 2 * P, -X + 0.1 + i * (L - 0.2) / 15, yBody + 0.115, 0);   // рейки-ламелі
+  bx(mattressM, L - 0.13, 0.1, W - 0.13, 0, yBody + 0.175, 0);                                    // матрац
+  for (let i = 1; i < 9; i++) bx(stripeM, 0.006, 0.101, W - 0.131, -X + 0.065 + i * (L - 0.13) / 9, yBody + 0.175, 0); // стьобані смуги
+
+  const cushion = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), pillowM);                 // подушечка в узголів'ї
+  cushion.scale.set(1.1, 0.3, 1.5); cushion.position.set(-X + 0.2, yBody + 0.245, 0); crib.add(cushion);
+  bx(pillowM, 0.5, 0.012, W - 0.15, 0.25, yBody + 0.232, 0);                                        // загорнутий край простирадла внизу
+
+  // --- борти: довгі з вертикальних щаблів, ближній до кімнати (−z) з опускною секцією, торці з щаблями ---
+  const slat = (x, y0, y1, z) => bx(white, 0.016, y1 - y0, 0.016, x, (y0 + y1) / 2, z);
+  const nSide = 20;
+  for (const sz of [-1, 1]) {
+    for (let i = 0; i <= nSide; i++) slat(-X + P + 0.025 + i * (L - 2 * P - 0.05) / nSide, yBody + 0.18, sz < 0 ? yTop - 0.08 : yTop, sz * (Z - 0.02));
+    bx(white, L - 2 * P, 0.03, 0.03, 0, yBody + 0.17, sz * (Z - 0.02));                         // нижня рейка борту
+    bx(white, L - 2 * P, 0.035, 0.035, 0, sz < 0 ? yTop - 0.08 : yTop, sz * (Z - 0.02));          // верхня рейка (ближній борт нижчий)
+  }
+  const nEnd = 9;
+  for (const sx of [-1, 1]) {
+    const top = sx < 0 ? yEnd : yEnd - 0.1;
+    for (let i = 0; i <= nEnd; i++) bx(white, 0.016, top - yBody - 0.28, 0.016, sx * (X - 0.02), yBody + 0.18 + (top - yBody - 0.28) / 2, -Z + P + 0.025 + i * (W - 2 * P - 0.05) / nEnd);
+    bx(white, 0.035, 0.035, W - 2 * P, sx * (X - 0.02), yBody + 0.17, 0);                       // нижня рейка торця
+    bx(white, 0.04, 0.05, W + 0.02, sx * (X - 0.02), top - 0.01, 0);                            // верхня рейка торця (виступає, як у зразку)
+  }
+  addCollider(2.95 - L / 2 - 0.02, 2.95 + L / 2 + 0.02, 4.075 - W / 2 - 0.02, 4.075 + W / 2);
+})();
