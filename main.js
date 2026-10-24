@@ -504,42 +504,77 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
   addCollider(sx0, sx1, sz0, sz1);
 })();
 
-// обідня зона: стіл 1.6 x 0.9 вздовж південної стіни з відступом 0.65 м (щоб між столом і стіною можна було сидіти) і 6 стільців, все — світле дерево, як стільниця
+// обідня зона: стіл 1.6 x 0.9 вздовж південної стіни з відступом 0.65 м (щоб між столом і стіною можна було сидіти)
+// і 6 стільців. Вигляд: білий стіл із заокругленою стільницею та точеними ніжками, білі стільці з високою
+// спинкою на планках і сірими м'якими сидіннями
 (function buildDining() {
   const g = houseGroup, base = FLOOR_Y;
-  const tex = oakTexture(false, true);
-  tex.repeat.set(0.7, 0.7);
-  const wood = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55 });
-  const blk = (x0, x1, y0, y1, z0, z1) =>
-    box(x1 - x0, y1 - y0, z1 - z0, wood, (x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2, g);
+  const white = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.4 });
+  const fabric = new THREE.MeshStandardMaterial({ color: 0x5f6469, roughness: 0.95 });
+  const mesh = (geo, m, x, y, z) => {
+    const o = new THREE.Mesh(geo, m);
+    o.position.set(x, base + y, z);
+    o.castShadow = o.receiveShadow = true;
+    g.add(o);
+    return o;
+  };
+  const blk = (x0, x1, y0, y1, z0, z1, m = white) =>
+    box(x1 - x0, y1 - y0, z1 - z0, m, (x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2, g);
+  // ніжка, що звужується донизу
+  const leg = (x, z, y0, y1, rTop, rBot) => {
+    const o = mesh(new THREE.CylinderGeometry(rTop, rBot, y1 - y0, 4), white, x, (y0 + y1) / 2, z);
+    o.rotation.y = Math.PI / 4;
+  };
 
   const cx = 5.1, L = 1.6, W = 0.9, cz = 8.15 - W / 2;
   const tx0 = cx - L / 2, tx1 = cx + L / 2, tz0 = cz - W / 2, tz1 = cz + W / 2;
-  blk(tx0, tx1, 0.72, 0.76, tz0, tz1);                                   // стільниця
-  for (const x of [tx0 + 0.08, tx1 - 0.08]) for (const z of [tz0 + 0.08, tz1 - 0.08]) blk(x - 0.035, x + 0.035, 0, 0.72, z - 0.035, z + 0.035); // ніжки
+
+  // стільниця: прямокутник із закругленими кутами
+  const r = 0.1, hw = L / 2, hd = W / 2;
+  const sh = new THREE.Shape();
+  sh.moveTo(-hw + r, -hd);
+  sh.lineTo(hw - r, -hd); sh.quadraticCurveTo(hw, -hd, hw, -hd + r);
+  sh.lineTo(hw, hd - r);  sh.quadraticCurveTo(hw, hd, hw - r, hd);
+  sh.lineTo(-hw + r, hd); sh.quadraticCurveTo(-hw, hd, -hw, hd - r);
+  sh.lineTo(-hw, -hd + r); sh.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
+  const topGeo = new THREE.ExtrudeGeometry(sh, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 2, curveSegments: 8 });
+  topGeo.rotateX(-Math.PI / 2);
+  mesh(topGeo, white, cx, 0.72, cz);
+  blk(tx0 + 0.07, tx1 - 0.07, 0.65, 0.72, tz0 + 0.07, tz1 - 0.07);                       // царга
+  for (const x of [tx0 + 0.13, tx1 - 0.13]) for (const z of [tz0 + 0.13, tz1 - 0.13]) {
+    blk(x - 0.05, x + 0.05, 0.6, 0.72, z - 0.05, z + 0.05);                               // верх ніжки
+    leg(x, z, 0, 0.62, 0.05, 0.025);                                                        // ніжка
+  }
   addCollider(tx0, tx1, tz0, tz1);
 
-  // стілець: сидіння 0.42, спинка з боку від столу; dir = -1 північна сторона столу, +1 південна
-  const chair = (x, z, dir) => {
+  // стілець; ax — вісь спинки ('z' або 'x'), dir — куди дивиться спинка (+1/-1 уздовж осі)
+  const chair = (x, z, ax, dir) => {
+    const bb = (u0, u1, v0, v1, y0, y1, m = white) => {            // u — вздовж спинки (+ до спинки), v — убік
+      ax === 'z'
+        ? blk(x + v0, x + v1, y0, y1, z + Math.min(u0 * dir, u1 * dir), z + Math.max(u0 * dir, u1 * dir), m)
+        : blk(x + Math.min(u0 * dir, u1 * dir), x + Math.max(u0 * dir, u1 * dir), y0, y1, z + v0, z + v1, m);
+    };
     const h = 0.21;
-    blk(x - h, x + h, 0.45, 0.49, z - h, z + h);                         // сидіння
-    for (const dx of [-h + 0.03, h - 0.03]) for (const dz of [-h + 0.03, h - 0.03]) blk(x + dx - 0.02, x + dx + 0.02, 0, 0.45, z + dz - 0.02, z + dz + 0.02);
-    const bz = z + dir * (h - 0.015);
-    blk(x - h, x + h, 0.49, 0.9, bz - 0.015, bz + 0.015);                // спинка
+    // задні стійки суцільні від підлоги до верху спинки; сидіння стоїть між ними і не перерізає їх
+    for (const v of [-0.2, 0.2]) bb(0.162, 0.198, v - 0.018, v + 0.018, 0, 1.02);
+    bb(-h, 0.162, -0.182, 0.182, 0.42, 0.47);                       // рама сидіння
+    bb(-h + 0.01, 0.152, -0.172, 0.172, 0.47, 0.52, fabric);        // м'яке сидіння
+    for (const v of [-0.18, 0.18]) {                                // передні ніжки звужені
+      const u = -0.18, px = ax === 'z' ? x + v : x + u * dir, pz = ax === 'z' ? z + u * dir : z + v;
+      leg(px, pz, 0, 0.42, 0.022, 0.015);
+    }
+    bb(0.162, 0.198, -0.2, 0.2, 0.96, 1.02);                        // верхня планка
+    bb(0.165, 0.195, -0.182, 0.182, 0.58, 0.62);                    // нижня планка
+    for (let i = 0; i < 5; i++) {
+      const v = -0.115 + i * 0.0575;
+      bb(0.168, 0.192, v - 0.01, v + 0.01, 0.62, 0.96);              // планки спинки
+    }
     addCollider(x - h, x + h, z - h, z + h);
   };
   // по два стільці з обох довгих сторін (з боку стіни теж) і по одному з торців
-  for (const x of [cx - 0.4, cx + 0.4]) { chair(x, tz0 - 0.1, -1); chair(x, tz1 + 0.1, +1); }
-  const endChair = (x, z, dir) => {
-    const h = 0.21;
-    blk(x - h, x + h, 0.45, 0.49, z - h, z + h);
-    for (const dx of [-h + 0.03, h - 0.03]) for (const dz of [-h + 0.03, h - 0.03]) blk(x + dx - 0.02, x + dx + 0.02, 0, 0.45, z + dz - 0.02, z + dz + 0.02);
-    const bx = x + dir * (h - 0.015);
-    blk(bx - 0.015, bx + 0.015, 0.49, 0.9, z - h, z + h);
-    addCollider(x - h, x + h, z - h, z + h);
-  };
-  endChair(tx0 - 0.1, cz, -1);
-  endChair(tx1 + 0.1, cz, +1);
+  for (const x of [cx - 0.4, cx + 0.4]) { chair(x, tz0 - 0.1, 'z', -1); chair(x, tz1 + 0.1, 'z', +1); }
+  chair(tx0 - 0.1, cz, 'x', -1);
+  chair(tx1 + 0.1, cz, 'x', +1);
 })();
 
 // ґанок: настил, білі колони, перила, дашок, сходинка
