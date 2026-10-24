@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { plot, house, walls } from './plan.js';
+import { plot, house, walls, floors, ceilingDrop } from './plan.js';
 
 // ---------- сцена ----------
 const scene = new THREE.Scene();
@@ -15,7 +15,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x6b7a4a, 0.8));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8c8c82, 0.8));
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
 sun.position.set(25, 40, 20);
 sun.castShadow = true;
@@ -193,6 +193,130 @@ function buildWall(w) {
   piece(cursor, L + half, 0, w.h);
 }
 walls.forEach(buildWall);
+
+// підлога: темний дуб (лінолеум під дошку) і білі плінтуси
+function oakTexture(tile = false) {
+  const S = 1024, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  const rows = 12, rh = S / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -Math.random() * 500;
+    while (x < S) {
+      const len = 380 + Math.random() * 300;
+      const l = 24 + Math.random() * 7;
+      g.fillStyle = tile ? `hsl(${30 + Math.random() * 6}, ${52 + Math.random() * 10}%, ${40 + Math.random() * 8}%)` : `hsl(${24 + Math.random() * 6}, ${48 + Math.random() * 10}%, ${l}%)`;
+      g.fillRect(x, r * rh, len, rh);
+      g.strokeStyle = tile ? 'rgba(214,200,176,.9)' : 'rgba(30,15,5,.35)'; g.lineWidth = tile ? 3 : 2;
+      g.strokeRect(x, r * rh, len, rh);
+      g.strokeStyle = 'rgba(40,20,5,.18)'; g.lineWidth = 1;
+      for (let k = 0; k < 6; k++) {
+        const y = r * rh + Math.random() * rh;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + len, y + (Math.random() - .5) * 4); g.stroke();
+      }
+      x += len;
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+const oak = oakTexture(), oakTile = oakTexture(true);
+const doorGaps = (axis, c) => {
+  const gaps = [];
+  for (const w of walls) {
+    const alongX = w.a[1] === w.b[1];
+    if (alongX !== (axis === 'x')) continue;
+    if (Math.abs((alongX ? w.a[1] : w.a[0]) - c) > 0.3) continue;
+    for (const o of w.openings) {
+      if (o.type !== 'door') continue;
+      const m = (alongX ? w.a[0] : w.a[1]) + o.at;
+      gaps.push([m - o.w / 2, m + o.w / 2]);
+    }
+  }
+  return gaps.sort((p, q) => p[0] - q[0]);
+};
+function skirting(axis, c, from, to, inward) {
+  const H = 0.08, T = 0.015;
+  let cur = from;
+  const piece = (a, b) => {
+    if (b - a < 0.02) return;
+    const m = (a + b) / 2, l = b - a;
+    axis === 'x'
+      ? box(l, H, T, mat.white, m, FLOOR_Y + H / 2, c + inward * T / 2, houseGroup)
+      : box(T, H, l, mat.white, c + inward * T / 2, FLOOR_Y + H / 2, m, houseGroup);
+  };
+  for (const [a, b] of doorGaps(axis, c)) {
+    if (b <= from || a >= to) continue;
+    piece(cur, Math.max(cur, a));
+    cur = Math.min(to, Math.max(cur, b));
+  }
+  piece(cur, to);
+}
+// стіни санвузла: та сама плитка під дерево, по всій висоті до стелі
+const tileWallMat = new THREE.MeshStandardMaterial({ map: oakTile, roughness: 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+function clad(f) {
+  const top = house.wallHeight - ceilingDrop;
+  // ділянка стіни [s0,s1] x [y0,y1] на лінії c; UV у світових метрах, щоб шви йшли безперервно
+  const panel = (axis, c, inward, s0, s1, y0, y1) => {
+    if (s1 - s0 < 1e-3 || y1 - y0 < 1e-3) return;
+    const g = new THREE.PlaneGeometry(s1 - s0, y1 - y0);
+    const uv = g.attributes.uv;
+    for (let i = 0; i < uv.count; i++) {
+      uv.setXY(i, (s0 + uv.getX(i) * (s1 - s0)) / 2.4, (y0 + uv.getY(i) * (y1 - y0)) / 2.4);
+    }
+    const m = new THREE.Mesh(g, tileWallMat);
+    const sm = (s0 + s1) / 2, y = FLOOR_Y + (y0 + y1) / 2, off = inward * 0.003;
+    if (axis === 'x') { m.position.set(sm, y, c + off); m.rotation.y = inward > 0 ? 0 : Math.PI; }
+    else { m.position.set(c + off, y, sm); m.rotation.y = inward > 0 ? Math.PI / 2 : -Math.PI / 2; }
+    m.receiveShadow = true;
+    houseGroup.add(m);
+  };
+  const edge = (axis, c, from, to, inward) => {
+    const ops = [];
+    for (const w of walls) {
+      const alongX = w.a[1] === w.b[1];
+      if (alongX !== (axis === 'x') || Math.abs((alongX ? w.a[1] : w.a[0]) - c) > 0.3) continue;
+      for (const o of w.openings) {
+        const m = (alongX ? w.a[0] : w.a[1]) + o.at;
+        if (m + o.w / 2 > from && m - o.w / 2 < to) ops.push({ l: m - o.w / 2, r: m + o.w / 2, y0: o.sill, y1: o.sill + o.h });
+      }
+    }
+    ops.sort((p, q) => p.l - q.l);
+    let cur = from;
+    for (const o of ops) {
+      panel(axis, c, inward, cur, o.l, 0, top);
+      panel(axis, c, inward, o.l, o.r, 0, o.y0);
+      panel(axis, c, inward, o.l, o.r, o.y1, top);
+      cur = o.r;
+    }
+    panel(axis, c, inward, cur, to, 0, top);
+  };
+  edge('x', f.z0, f.x0, f.x1, 1);
+  edge('x', f.z1, f.x0, f.x1, -1);
+  edge('z', f.x0, f.z0, f.z1, 1);
+  edge('z', f.x1, f.z0, f.z1, -1);
+}
+
+for (const f of floors) {
+  const w = f.x1 - f.x0, d = f.z1 - f.z0;
+  const t = (f.tile ? oakTile : oak).clone();
+  t.needsUpdate = true;
+  t.repeat.set(w / 2.4, d / 2.4);
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d),
+    new THREE.MeshStandardMaterial({ map: t, roughness: f.tile ? 0.35 : 0.55, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set((f.x0 + f.x1) / 2, FLOOR_Y + 0.002, (f.z0 + f.z1) / 2);
+  m.receiveShadow = true;
+  houseGroup.add(m);
+  if (f.tile) { clad(f); continue; }
+  skirting('x', f.z0, f.x0, f.x1, 1);
+  skirting('x', f.z1, f.x0, f.x1, -1);
+  skirting('z', f.x0, f.z0, f.z1, 1);
+  skirting('z', f.x1, f.z0, f.z1, -1);
+}
 
 // дах (двосхилий, гребінь уздовж x)
 const roof = new THREE.Group();
@@ -450,4 +574,21 @@ addEventListener('resize', () => {
 renderer.setAnimationLoop(() => {
   update(Math.min(clock.getDelta(), 0.1));
   renderer.render(scene, camera);
+});
+
+// біла натяжна стеля по всій хаті; ховається разом з дахом (R)
+(function buildCeiling() {
+  const x0 = 0.2, x1 = 10.8, z0 = 0.2, z1 = 8.8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0),
+    new THREE.MeshStandardMaterial({ color: 0xf6f5f0, emissive: 0xf2f0e8, emissiveIntensity: 0.75, roughness: 0.4 }));
+  m.rotation.x = Math.PI / 2; // нормаль вниз — видно лише зсередини
+  m.position.set((x0 + x1) / 2, -ceilingDrop, (z0 + z1) / 2);
+  roof.add(m);
+})();
+
+// внутрішнє освітлення: по лампі під стелею в кожному приміщенні (тіней немає)
+[[2.5, 2.3], [7.9, 2.3], [3.5, 6.7], [7.0, 6.7], [10.0, 5.4], [10.0, 6.9], [10.0, 8.2]].forEach(([x, z]) => {
+  const l = new THREE.PointLight(0xfff1dc, 9, 8, 1.6);
+  l.position.set(x, 2.65, z);
+  houseGroup.add(l);
 });
