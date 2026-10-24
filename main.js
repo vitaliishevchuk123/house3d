@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { plot, house, walls, floors, ceilingDrop } from './plan.js';
 
 // ---------- сцена ----------
@@ -487,21 +488,108 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
   const dark = new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.4 });
   const screen = new THREE.MeshStandardMaterial({ color: 0x0b0d0e, roughness: 0.08, metalness: 0.3 });
   blk(cx - 0.15, cx + 0.15, 1.25, 1.55, NZ, NZ + 0.012, dark);                // настінна планка
-  blk(cx - 0.03, cx + 0.03, 1.37, 1.43, NZ + 0.012, NZ + 0.075, dark);        // кронштейн
-  blk(cx - 0.725, cx + 0.725, 0.98, 1.82, NZ + 0.075, NZ + 0.115, dark);      // корпус
-  blk(cx - 0.71, cx + 0.71, 0.995, 1.805, NZ + 0.115, NZ + 0.118, screen);   // екран
+  // кронштейн із нахилом: ТБ відсунутий від стіни, верх висунутий вперед на 8° — екран дивиться трохи вниз, на тих, хто сидить на дивані
+  blk(cx - 0.03, cx + 0.03, 1.37, 1.43, NZ + 0.012, NZ + 0.108, dark);        // виніс кронштейна
+  const tv = new THREE.Group();
+  tv.position.set(cx, base + 1.4, NZ + 0.14);
+  tv.rotation.x = 0.14;
+  g.add(tv);
+  box(0.2, 0.2, 0.012, dark, 0, 0, -0.026, tv);                                // VESA-плита
+  box(1.45, 0.84, 0.04, dark, 0, 0, 0, tv);                                    // корпус
+  box(1.42, 0.81, 0.003, screen, 0, 0, 0.0215, tv);                            // екран
 
-  // диван 2.4 x 0.93, спинкою до південної стіни, обличчям до ТБ
-  const fabric = new THREE.MeshStandardMaterial({ color: 0xb9b0a2, roughness: 0.95 });
-  const cushion = new THREE.MeshStandardMaterial({ color: 0xc6bdae, roughness: 0.95 });
-  const sx0 = cx - 1.2, sx1 = cx + 1.2, sz0 = 7.87, sz1 = 8.78, back = 0.22, arm = 0.2;
-  blk(sx0, sx1, 0.08, 0.38, sz0, sz1, fabric);                                // основа
-  blk(sx0 + arm, sx1 - arm, 0.38, 0.5, sz0, sz1 - back, cushion);            // подушки сидіння
-  blk(sx0 + arm, sx1 - arm, 0.38, 0.85, sz1 - back, sz1, fabric);            // спинка
-  blk(sx0, sx0 + arm, 0.38, 0.62, sz0, sz1, fabric);                          // підлокітники
-  blk(sx1 - arm, sx1, 0.38, 0.62, sz0, sz1, fabric);
-  for (const x of [sx0 + 0.1, sx1 - 0.1]) for (const z of [sz0 + 0.1, sz1 - 0.1]) blk(x - 0.03, x + 0.03, 0, 0.08, z - 0.03, z + 0.03, dark); // ніжки
-  addCollider(sx0, sx1, sz0, sz1);
+  // шкіряне крісло-реклайнер (як у серіалі «Друзі») і кутовий тканинний диван: темно-коричнева шкіра, товсті підлокітники, високі спинки з валиком.
+  const leather = new THREE.MeshStandardMaterial({ color: 0x35221a, roughness: 0.45 });
+  const piece = (grp, w, h, d, r, x, y, z, rotX = 0) => {
+    const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 6, r), leather);
+    m.position.set(x, y, z);
+    m.rotation.x = rotX;
+    m.castShadow = m.receiveShadow = true;
+    grp.add(m);
+  };
+  // у локальних координатах: обличчям до -z, спинкою до +z, y — вгору від підлоги
+  const seatSet = (width, seats, headrest) => {
+    const grp = new THREE.Group(), D = 0.9, arm = 0.16;
+    piece(grp, width, 0.3, D, 0.12, 0, 0.2, 0);                                   // основа
+    for (const sx of [-1, 1]) piece(grp, arm, 0.34, D - 0.02, 0.08, sx * (width / 2 - arm / 2), 0.5, 0); // підлокітники
+    const inner = width - 2 * arm - 0.02, sw = inner / seats;
+    for (let i = 0; i < seats; i++) {
+      const x = -inner / 2 + sw * (i + 0.5);
+      piece(grp, sw - 0.02, 0.2, D - 0.22, 0.1, x, 0.45, -0.08);                  // подушка сидіння
+      piece(grp, sw - 0.02, headrest ? 0.62 : 0.55, 0.26, 0.12, x, headrest ? 0.68 : 0.66, 0.3, 0.2); // спинка
+      if (headrest) piece(grp, sw - 0.02, 0.2, 0.3, 0.1, x, 1.0, 0.36, 0.2);   // валик-підголівник
+    }
+    return grp;
+  };
+  const place = (grp, x, z, yaw, hw, hd) => {
+    grp.position.set(x, base, z);
+    grp.rotation.y = yaw;
+    g.add(grp);
+    addCollider(x - hw, x + hw, z - hd, z + hd);
+  };
+  // шкіряне крісло-реклайнер з боку, ближчого до столу, розвернуте прямо на ТБ (як півколо з диваном)
+  place(seatSet(0.9, 1, true), 3.55, 8.17, 0.42, 0.58, 0.58);
+
+  // кутовий тканинний диван у південно-західному куті: довга частина вздовж південної стіни, шезлонг висунутий на північ
+  const oat = new THREE.MeshStandardMaterial({ color: 0xb9b0a2, roughness: 0.97 });
+  const oatSoft = new THREE.MeshStandardMaterial({ color: 0xc8bfb0, roughness: 0.97 });
+  const soft = (m, x0, x1, y0, y1, z0, z1, r) => {
+    const o = new THREE.Mesh(new RoundedBoxGeometry(x1 - x0, y1 - y0, z1 - z0, 5, r), m);
+    o.position.set((x0 + x1) / 2, base + (y0 + y1) / 2, (z0 + z1) / 2);
+    o.castShadow = o.receiveShadow = true;
+    g.add(o);
+  };
+  const X0 = 0.25, X1 = 2.85, ZB = 8.78, ZF = 7.83, ZC = 7.0, XC = 1.2, arm = 0.18;
+  soft(oat, X0, X1, 0.06, 0.36, ZF, ZB, 0.08);                    // основа довгої частини
+  soft(oat, X0, XC, 0.06, 0.36, ZC, ZF, 0.08);                    // основа шезлонга
+  soft(oat, X0, X0 + arm, 0.3, 0.68, ZC, ZB, 0.08);              // підлокітник із західного боку (вздовж шезлонга й дивана)
+  soft(oat, X1 - arm, X1, 0.3, 0.68, ZF, ZB, 0.08);              // підлокітник зі східного боку
+  const lw = (X1 - X0 - 2 * arm) / 3;
+  for (let i = 0; i < 3; i++) {
+    const x0 = X0 + arm + lw * i;
+    soft(oatSoft, x0 + 0.01, x0 + lw - 0.01, 0.36, 0.55, ZF, ZB - 0.2, 0.08);   // подушки сидіння
+    soft(oat, x0 + 0.01, x0 + lw - 0.01, 0.36, 0.88, ZB - 0.25, ZB, 0.11);       // спинки
+  }
+  soft(oatSoft, X0 + arm + 0.01, XC - 0.01, 0.36, 0.55, ZC, ZF, 0.08);           // подушка шезлонга
+  addCollider(X0, X1, ZF, ZB);
+  addCollider(X0, XC, ZC, ZF);
+
+  // ТБ-тумба 1.6 x 0.4 x 0.47 з світлого дерева (як стільниця) на ніжках, під ТБ по центру:
+  // зліва й справа шухляди, посередині відкрита ніша
+  const tex = oakTexture(false, true);
+  tex.repeat.set(0.8, 0.5);
+  const lightWood = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 });
+  const cX0 = cx - 0.8, cX1 = cx + 0.8, cZ0 = NZ + 0.015, cZ1 = cZ0 + 0.4, cy0 = 0.14, cy1 = 0.47;
+  blk(cX0, cX1, cy0, cy1, cZ0, cZ1, lightWood);                                   // корпус
+  blk(cX0 - 0.02, cX1 + 0.02, cy1, cy1 + 0.025, cZ0 - 0.005, cZ1 + 0.015, lightWood); // стільниця
+  blk(cX0 + 0.015, cX0 + 0.515, cy0 + 0.02, cy1 - 0.02, cZ1, cZ1 + 0.008, lightWood);  // шухляда зліва
+  blk(cX1 - 0.515, cX1 - 0.015, cy0 + 0.02, cy1 - 0.02, cZ1, cZ1 + 0.008, lightWood);  // шухляда справа
+  blk(cX0 + 0.53, cX1 - 0.53, cy0 + 0.02, cy1 - 0.02, cZ1 - 0.004, cZ1 + 0.004, dark); // відкрита ніша
+  blk(cX0 + 0.19, cX0 + 0.34, 0.385, 0.4, cZ1 + 0.008, cZ1 + 0.03, dark);              // ручки
+  blk(cX1 - 0.34, cX1 - 0.19, 0.385, 0.4, cZ1 + 0.008, cZ1 + 0.03, dark);
+  for (const x of [cX0 + 0.1, cX1 - 0.1]) for (const z of [cZ0 + 0.07, cZ1 - 0.07]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.018, cy0, 4), lightWood);
+    leg.position.set(x, base + cy0 / 2, z);
+    leg.rotation.y = Math.PI / 4;
+    leg.castShadow = true;
+    g.add(leg);
+  }
+  addCollider(cX0 - 0.02, cX1 + 0.02, cZ0, cZ1 + 0.03);
+
+  // скляний журнальний столик 1.0 x 0.55 x 0.42 перед диваном: загартоване скло в тонкій темній металевій рамі
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0xcfe8e4, transparent: true, opacity: 0.3, roughness: 0.05, depthWrite: false });
+  const tx0 = 1.55, tx1 = 2.55, tz0 = 6.825, tz1 = 7.375, th = 0.42, bar = 0.022;
+  blk(tx0, tx1, th, th + 0.012, tz0, tz1, glassMat);                                        // скло
+  blk(tx0, tx1, th - bar, th, tz0, tz0 + bar, dark);                                        // рама під склом
+  blk(tx0, tx1, th - bar, th, tz1 - bar, tz1, dark);
+  blk(tx0, tx0 + bar, th - bar, th, tz0, tz1, dark);
+  blk(tx1 - bar, tx1, th - bar, th, tz0, tz1, dark);
+  for (const x of [tx0, tx1 - bar]) for (const z of [tz0, tz1 - bar]) blk(x, x + bar, 0, th - bar, z, z + bar, dark); // ніжки
+  blk(tx0, tx1, 0.1, 0.1 + bar, tz0, tz0 + bar, dark);                                      // нижня обв'язка
+  blk(tx0, tx1, 0.1, 0.1 + bar, tz1 - bar, tz1, dark);
+  blk(tx0, tx0 + bar, 0.1, 0.1 + bar, tz0, tz1, dark);
+  blk(tx1 - bar, tx1, 0.1, 0.1 + bar, tz0, tz1, dark);
+  addCollider(tx0, tx1, tz0, tz1);
 })();
 
 // обідня зона: стіл 1.6 x 0.9 вздовж південної стіни з відступом 0.65 м (щоб між столом і стіною можна було сидіти)
@@ -526,7 +614,7 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
     o.rotation.y = Math.PI / 4;
   };
 
-  const cx = 5.1, L = 1.6, W = 0.9, cz = 8.15 - W / 2;
+  const cx = 5.5, L = 1.6, W = 0.9, cz = 8.15 - W / 2;
   const tx0 = cx - L / 2, tx1 = cx + L / 2, tz0 = cz - W / 2, tz1 = cz + W / 2;
 
   // стільниця: прямокутник із закругленими кутами
@@ -575,6 +663,202 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
   for (const x of [cx - 0.4, cx + 0.4]) { chair(x, tz0 - 0.1, 'z', -1); chair(x, tz1 + 0.1, 'z', +1); }
   chair(tx0 - 0.1, cz, 'x', -1);
   chair(tx1 + 0.1, cz, 'x', +1);
+})();
+
+// ---------- картини ----------
+// Усе намальовано процедурно: сімейні «полотна» (мама, тато, двоє малих і немовля) та ікона «Таємна вечеря», вишита бісером.
+// Щоб замінити на справжні фото, поклади файли в папку art/ з іменами canvas1.jpg, canvas2.jpg, canvas3.jpg, supper.jpg.
+const art = (() => {
+  const skinTones = ['#f1c9a5', '#e8b88f', '#f5d3b5'];
+  const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return [c, c.getContext('2d')]; };
+
+  // повна постать: feet — лінія ніг, h — висота, kind: 'man' | 'woman' | 'kid'
+  function figure(g, x, feet, h, o) {
+    const kid = o.kind === 'kid', r = h * (kid ? 0.13 : 0.085);
+    const legH = h * (kid ? 0.32 : 0.45), torsoH = h * (kid ? 0.3 : 0.33), bw = h * (kid ? 0.2 : 0.17);
+    const hipY = feet - legH, shoulderY = hipY - torsoH, headY = shoulderY - r * 1.15;
+    g.lineCap = 'round';
+    if (o.kind === 'woman' && o.dress) {                                 // сукня
+      g.fillStyle = o.top;
+      g.beginPath(); g.moveTo(x - bw * 0.5, shoulderY); g.lineTo(x + bw * 0.5, shoulderY);
+      g.lineTo(x + bw * 0.95, hipY + legH * 0.55); g.lineTo(x - bw * 0.95, hipY + legH * 0.55); g.closePath(); g.fill();
+      g.strokeStyle = o.skin; g.lineWidth = h * 0.03;
+      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(x + s * bw * 0.25, hipY + legH * 0.55); g.lineTo(x + s * bw * 0.25, feet); g.stroke(); }
+    } else {
+      g.strokeStyle = o.bottom; g.lineWidth = h * (kid ? 0.065 : 0.055);
+      for (const s of [-1, 1]) { g.beginPath(); g.moveTo(x + s * bw * 0.22, hipY); g.lineTo(x + s * bw * 0.28, feet - h * 0.02); g.stroke(); }
+      g.fillStyle = o.top;
+      g.beginPath(); g.roundRect(x - bw / 2, shoulderY, bw, torsoH + h * 0.02, bw * 0.25); g.fill();
+    }
+    g.strokeStyle = o.top; g.lineWidth = h * 0.045;                       // руки
+    const ah = o.arms || 'down';
+    for (const s of [-1, 1]) {
+      g.beginPath(); g.moveTo(x + s * bw / 2, shoulderY + h * 0.03);
+      if (ah === 'hold') g.lineTo(x + s * bw * 0.35, shoulderY + torsoH * 0.75); else g.lineTo(x + s * (bw / 2 + h * 0.03), hipY + h * 0.03);
+      g.stroke();
+    }
+    g.fillStyle = o.skin;                                                  // шия й голова
+    g.fillRect(x - r * 0.3, headY + r * 0.7, r * 0.6, r * 0.6);
+    g.beginPath(); g.arc(x, headY, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = o.hair;                                                  // волосся
+    if (o.kind === 'woman' && !o.short) { g.beginPath(); g.ellipse(x, headY + r * 0.2, r * 1.15, r * 1.4, 0, 0, Math.PI * 2); g.fill(); g.fillStyle = o.skin; g.beginPath(); g.arc(x, headY + r * 0.15, r * 0.88, 0, Math.PI * 2); g.fill(); g.fillStyle = o.hair; }
+    g.beginPath(); g.arc(x, headY - r * 0.15, r * 1.02, Math.PI * 1.05, Math.PI * 1.95); g.fill();
+    g.fillStyle = '#3a2a22';                                                // очі й посмішка
+    g.beginPath(); g.arc(x - r * 0.35, headY, r * 0.08, 0, 7); g.arc(x + r * 0.35, headY, r * 0.08, 0, 7); g.fill();
+    g.strokeStyle = '#a5594c'; g.lineWidth = r * 0.1; g.beginPath(); g.arc(x, headY + r * 0.2, r * 0.38, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+  }
+  function baby(g, x, y, s, skin, wrap) {                                  // немовля у пелюшці
+    g.fillStyle = wrap; g.beginPath(); g.ellipse(x, y + s * 0.5, s * 0.62, s * 0.8, 0.3, 0, 7); g.fill();
+    g.fillStyle = skin; g.beginPath(); g.arc(x - s * 0.1, y - s * 0.25, s * 0.5, 0, 7); g.fill();
+    g.fillStyle = '#3a2a22'; g.beginPath(); g.arc(x - s * 0.27, y - s * 0.25, s * 0.05, 0, 7); g.arc(x + s * 0.07, y - s * 0.25, s * 0.05, 0, 7); g.fill();
+  }
+  const dad = (skin) => ({ kind: 'man', skin, hair: '#3d2b1f', top: '#4f6f8a', bottom: '#3c4650' });
+  const mom = (skin) => ({ kind: 'woman', skin, hair: '#8a5a3a', top: '#b0504a', bottom: '#4a4a52', dress: true, arms: 'hold' });
+  const kid1 = (skin) => ({ kind: 'kid', skin, hair: '#5a3a24', top: '#e0a63a', bottom: '#3c5a7a' });
+  const kid2 = (skin) => ({ kind: 'kid', skin, hair: '#c9923a', top: '#6aa57e', bottom: '#8a5a6a' });
+
+  function landscape(g, w, h) {
+    const sky = g.createLinearGradient(0, 0, 0, h * 0.7);
+    sky.addColorStop(0, '#9cc7e8'); sky.addColorStop(1, '#f1e6cf');
+    g.fillStyle = sky; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#f6d36b'; g.beginPath(); g.arc(w * 0.82, h * 0.2, h * 0.07, 0, 7); g.fill();
+    g.fillStyle = '#7da26a'; g.beginPath(); g.moveTo(0, h * 0.6); g.quadraticCurveTo(w * 0.3, h * 0.45, w * 0.6, h * 0.62); g.quadraticCurveTo(w * 0.85, h * 0.5, w, h * 0.58); g.lineTo(w, h); g.lineTo(0, h); g.fill();
+    g.fillStyle = '#5f8a55'; g.fillRect(0, h * 0.78, w, h * 0.22);
+  }
+
+  // полотно 1: уся родина на лузі біля хати (альбомне)
+  function canvas1() {
+    const [c, g] = mk(1200, 800);
+    landscape(g, 1200, 800);
+    g.fillStyle = '#65777a'; g.fillRect(820, 330, 260, 170);                                   // хата
+    g.fillStyle = '#604744'; g.beginPath(); g.moveTo(800, 335); g.lineTo(950, 250); g.lineTo(1100, 335); g.fill();
+    g.fillStyle = '#f2f0e8'; g.fillRect(880, 390, 50, 50); g.fillRect(970, 390, 50, 50);
+    g.fillStyle = '#4f7a46'; g.beginPath(); g.arc(120, 330, 90, 0, 7); g.fill(); g.fillStyle = '#5b4328'; g.fillRect(110, 400, 20, 130);
+    const feet = 740;
+    figure(g, 380, feet, 560, dad(skinTones[0]));
+    figure(g, 520, feet, 530, mom(skinTones[1]));
+    baby(g, 555, feet - 330, 60, skinTones[1], '#f3e9d8');
+    figure(g, 640, feet, 300, kid1(skinTones[0]));
+    figure(g, 730, feet, 260, kid2(skinTones[2]));
+    return c;
+  }
+  // полотно 2: батьки з немовлям, портрет (вертикальне)
+  function canvas2() {
+    const [c, g] = mk(720, 960);
+    const bg = g.createLinearGradient(0, 0, 0, 960); bg.addColorStop(0, '#e9d3b4'); bg.addColorStop(1, '#c9a27a');
+    g.fillStyle = bg; g.fillRect(0, 0, 720, 960);
+    g.fillStyle = 'rgba(255,255,255,.25)'; g.beginPath(); g.arc(360, 360, 300, 0, 7); g.fill();
+    figure(g, 250, 900, 820, dad(skinTones[0]));
+    figure(g, 470, 900, 780, mom(skinTones[1]));
+    baby(g, 480, 500, 80, skinTones[1], '#f6efe3');
+    return c;
+  }
+  // полотно 3: двоє малих із кульками (вертикальне, менше)
+  function canvas3() {
+    const [c, g] = mk(600, 780);
+    landscape(g, 600, 780);
+    g.strokeStyle = '#6b6b6b'; g.lineWidth = 3;
+    for (const [bx, by, col] of [[210, 150, '#d9534f'], [300, 110, '#f0ad4e'], [400, 160, '#5b9bd5']]) {
+      g.beginPath(); g.moveTo(bx, by + 55); g.lineTo(bx + 25 * (bx < 300 ? 1 : -1), 470); g.stroke();
+      g.fillStyle = col; g.beginPath(); g.ellipse(bx, by, 50, 62, 0, 0, 7); g.fill();
+    }
+    figure(g, 230, 700, 340, kid1(skinTones[0]));
+    figure(g, 370, 700, 300, kid2(skinTones[2]));
+    return c;
+  }
+
+  // ікона «Таємна вечеря», вишита бісером: малюємо спрощену композицію на сітці 280 x 148 «намистин»
+  // і перетворюємо кожну клітинку на намистинку з відблиском
+  function supper() {
+    const GW = 280, GH = 148, B = 5;
+    const [sm, g] = mk(GW, GH);
+    g.fillStyle = '#b8862a'; g.fillRect(0, 0, GW, GH);                       // золоте тло
+    for (const ax of [50, 140, 230]) {                                       // три арки позаду
+      g.fillStyle = '#6b3d1f'; g.beginPath(); g.moveTo(ax - 28, 90); g.lineTo(ax - 28, 30); g.arc(ax, 30, 28, Math.PI, 0); g.lineTo(ax + 28, 90); g.fill();
+      g.fillStyle = '#d9a94a'; g.beginPath(); g.moveTo(ax - 22, 90); g.lineTo(ax - 22, 31); g.arc(ax, 31, 22, Math.PI, 0); g.lineTo(ax + 22, 90); g.fill();
+    }
+    const robes = ['#7a5cab', '#3f7d5c', '#b0504a', '#4f6f8a', '#c0873a', '#7a8f4a', null, '#8a3f3f', '#3b6d8a', '#a0722d', '#5a4a8a', '#4a7a5a', '#b06a3a'];
+    const n = 13, x0 = 22, step = (GW - 2 * x0) / (n - 1);
+    for (let i = 0; i < n; i++) {
+      const x = x0 + i * step, c = i === 6, hy = c ? 55 : 62;
+      const w = c ? 24 : 17, hr = c ? 8 : 6.5, halo = c ? 13 : 9.5;
+      g.fillStyle = c ? '#b02a2a' : robes[i];                                // одяг
+      g.beginPath(); g.moveTo(x - w * 0.35, hy + hr); g.lineTo(x + w * 0.35, hy + hr); g.lineTo(x + w * 0.6, 100); g.lineTo(x - w * 0.6, 100); g.fill();
+      if (c) { g.fillStyle = '#2a4f9b'; g.beginPath(); g.moveTo(x - w * 0.5, hy + hr + 2); g.lineTo(x - w * 0.12, hy + hr + 2); g.lineTo(x - w * 0.3, 100); g.lineTo(x - w * 0.62, 100); g.fill();
+               g.beginPath(); g.moveTo(x + w * 0.5, hy + hr + 2); g.lineTo(x + w * 0.12, hy + hr + 2); g.lineTo(x + w * 0.3, 100); g.lineTo(x + w * 0.62, 100); g.fill(); }
+      g.fillStyle = '#f4d35e'; g.beginPath(); g.arc(x, hy, halo, 0, 7); g.fill();                  // німб
+      g.strokeStyle = '#7b5a12'; g.lineWidth = 1.2; g.beginPath(); g.arc(x, hy, halo, 0, 7); g.stroke();
+      if (c) { g.strokeStyle = '#b02a2a'; g.lineWidth = 1.6; g.beginPath(); g.moveTo(x, hy - halo + 1.5); g.lineTo(x, hy + halo - 1.5); g.moveTo(x - halo + 1.5, hy); g.lineTo(x + halo - 1.5, hy); g.stroke(); }
+      g.fillStyle = '#e8b88f'; g.beginPath(); g.arc(x, hy, hr, 0, 7); g.fill();                    // обличчя
+      g.fillStyle = i % 3 === 0 ? '#d8d2c4' : i % 3 === 1 ? '#5a3a24' : '#3d2b1f';                  // волосся й борода
+      g.beginPath(); g.arc(x, hy - hr * 0.25, hr * 1.02, Math.PI * 1.05, Math.PI * 1.95); g.fill();
+      g.beginPath(); g.arc(x, hy + hr * 0.55, hr * 0.7, 0.1, Math.PI - 0.1); g.fill();
+      g.fillStyle = '#2a1a10'; g.fillRect(x - hr * 0.45, hy - 1, 1.2, 1.2); g.fillRect(x + hr * 0.3, hy - 1, 1.2, 1.2);
+    }
+    g.fillStyle = '#f1ead6'; g.fillRect(12, 94, GW - 24, 30);                                       // скатертина
+    g.fillStyle = '#cfc6ab'; for (let x = 20; x < GW - 12; x += 14) g.fillRect(x, 100, 1.5, 24);    // складки
+    g.fillStyle = '#d7b448'; g.fillRect(12, 94, GW - 24, 2);                                        // галун
+    for (let i = 0; i < n; i++) {                                                                    // тарілки
+      const x = x0 + i * step; g.fillStyle = '#c9a227'; g.beginPath(); g.ellipse(x, 104, 5, 2.4, 0, 0, 7); g.fill();
+    }
+    g.fillStyle = '#e8d9a0'; g.beginPath(); g.ellipse(140, 101, 6, 2.6, 0, 0, 7); g.fill();       // хліб і чаша Христа
+    g.fillStyle = '#a02020'; g.fillRect(150, 96, 4, 5);
+    g.strokeStyle = '#7b1f1a'; g.lineWidth = 5; g.strokeRect(2.5, 2.5, GW - 5, GH - 5);              // червона рамка з бісеру
+    g.strokeStyle = '#f4d35e'; g.lineWidth = 1.5; g.strokeRect(6.5, 6.5, GW - 13, GH - 13);
+    // тло під бісер і намистинки
+    const px = g.getImageData(0, 0, GW, GH).data;
+    const [c, o] = mk(GW * B, GH * B);
+    o.fillStyle = '#1a1208'; o.fillRect(0, 0, GW * B, GH * B);
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const k = (y * GW + x) * 4, j = (Math.random() - 0.5) * 18;
+      o.fillStyle = `rgb(${Math.max(0, Math.min(255, px[k] + j))},${Math.max(0, Math.min(255, px[k + 1] + j))},${Math.max(0, Math.min(255, px[k + 2] + j))})`;
+      o.beginPath(); o.arc(x * B + B / 2, y * B + B / 2, B * 0.47, 0, 7); o.fill();
+      o.fillStyle = 'rgba(255,255,255,0.4)'; o.beginPath(); o.arc(x * B + B * 0.36, y * B + B * 0.34, B * 0.15, 0, 7); o.fill();
+    }
+    return c;
+  }
+
+  const tex = (c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; };
+  // спробувати підтягнути справжнє фото з art/<name>.jpg; якщо файла нема — лишається намальоване
+  const material = (name, draw) => {
+    const m = new THREE.MeshStandardMaterial({ map: tex(draw()), roughness: 0.7 });
+    new THREE.TextureLoader().load(`art/${name}.jpg`, t => { t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; m.map = t; m.needsUpdate = true; }, undefined, () => {});
+    return m;
+  };
+  return { canvas1: () => material('canvas1', canvas1), canvas2: () => material('canvas2', canvas2), canvas3: () => material('canvas3', canvas3), supper: () => material('supper', supper) };
+})();
+
+// розвішування на південній стіні: над диваном три полотна, над обіднім столом ікона «Таємна вечеря»
+(function hangArt() {
+  const g = houseGroup, base = FLOOR_Y, WALL = 8.8;
+  const edge = new THREE.MeshStandardMaterial({ color: 0xe9e2d2, roughness: 0.8 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.5 });
+  // полотно на підрамнику: товщина 3.5 см
+  const canvasOn = (x, y, w, h, mt) => {
+    const d = 0.035;
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), [edge, edge, edge, edge, edge, mt]); // -z — лицьова грань (дивиться на північ)
+    m.position.set(x, base + y, WALL - d / 2 - 0.003);
+    m.castShadow = true;
+    g.add(m);
+  };
+  canvasOn(1.0, 1.55, 1.1, 0.75, art.canvas1());
+  canvasOn(1.95, 1.58, 0.6, 0.8, art.canvas2());
+  canvasOn(3.55, 1.5, 0.5, 0.65, art.canvas3());
+
+  // ікона 1.1 x 0.58 у темній горіховій рамі з тонким золотим кантом
+  const cw = 1.1, ch = 0.58, cx = 5.5, cy = 1.78, d = 0.04, fr = 0.04;
+  const walnut = new THREE.MeshStandardMaterial({ color: 0x3b2616, roughness: 0.6 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.6, roughness: 0.35 });
+  const front = new THREE.Mesh(new THREE.PlaneGeometry(cw - 2 * fr, ch - 2 * fr), art.supper());
+  front.rotation.y = Math.PI;                                                  // дивитись на північ (-z)
+  front.position.set(cx, base + cy, WALL - 0.006);
+  g.add(front);
+  const bar = (w, h, x, y, m, dd) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dd), m); b.position.set(x, base + y, WALL - dd / 2 - 0.003); g.add(b); };
+  bar(cw, fr, cx, cy + ch / 2 - fr / 2, walnut, d); bar(cw, fr, cx, cy - ch / 2 + fr / 2, walnut, d);
+  bar(fr, ch - 2 * fr, cx - cw / 2 + fr / 2, cy, walnut, d); bar(fr, ch - 2 * fr, cx + cw / 2 - fr / 2, cy, walnut, d);
+  const k = 0.008, ix = cw - 2 * fr, iy = ch - 2 * fr;                          // золотий кант усередині рами
+  bar(ix, k, cx, cy + iy / 2 - k / 2, gold, d + 0.004); bar(ix, k, cx, cy - iy / 2 + k / 2, gold, d + 0.004);
+  bar(k, iy - 2 * k, cx - ix / 2 + k / 2, cy, gold, d + 0.004); bar(k, iy - 2 * k, cx + ix / 2 - k / 2, cy, gold, d + 0.004);
 })();
 
 // ґанок: настил, білі колони, перила, дашок, сходинка
