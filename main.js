@@ -309,10 +309,14 @@ const EYE = 1.7, RADIUS = 0.3;
 camera.position.set(0, EYE, plot.d / 2 - 2);
 camera.lookAt(0, EYE, 0);
 
+const isTouch = matchMedia('(pointer: coarse)').matches;
+camera.rotation.order = 'YXZ';
 const startEl = document.getElementById('start');
+const showStart = () => { if (!isTouch) startEl.style.display = 'flex'; };
 startEl.addEventListener('click', () => { if (mode === 'walk') walk.lock(); });
 walk.addEventListener('lock', () => startEl.style.display = 'none');
-walk.addEventListener('unlock', () => { if (mode === 'walk') startEl.style.display = 'flex'; });
+walk.addEventListener('unlock', () => { if (mode === 'walk') showStart(); });
+if (isTouch) startEl.style.display = 'none';
 
 const keys = {};
 addEventListener('keydown', e => {
@@ -336,7 +340,7 @@ function toggleMode() {
     orbit.enabled = false;
     camera.position.set(house.position[0] + house.w / 2, EYE, plot.d / 2 - 2);
     camera.lookAt(0, EYE, 0);
-    startEl.style.display = 'flex';
+    showStart();
   }
 }
 
@@ -347,14 +351,72 @@ function collides(x, z) {
   return false;
 }
 
+// ---------- дотик: джойстик ліворуч, свайп праворуч — огляд ----------
+const stick = { x: 0, y: 0 }; // -1..1, y<0 — вперед
+if (isTouch) {
+  document.getElementById('hud').style.display = 'none';
+  const css = (el, s) => { Object.assign(el.style, s); return el; };
+  const base = css(document.createElement('div'), { position: 'fixed', width: '120px', height: '120px', borderRadius: '50%', background: 'rgba(255,255,255,.18)', border: '2px solid rgba(255,255,255,.5)', display: 'none', pointerEvents: 'none' });
+  const knob = css(document.createElement('div'), { position: 'absolute', left: '35px', top: '35px', width: '50px', height: '50px', borderRadius: '50%', background: 'rgba(255,255,255,.6)' });
+  base.appendChild(knob);
+  document.body.appendChild(base);
+  const btn = (text, top, fn) => {
+    const b = css(document.createElement('button'), { position: 'fixed', right: '12px', top: top + 'px', padding: '10px 14px', font: '15px system-ui', border: 'none', borderRadius: '8px', background: 'rgba(0,0,0,.55)', color: '#fff' });
+    b.textContent = text;
+    b.addEventListener('click', fn);
+    document.body.appendChild(b);
+  };
+  btn('Дах', 12, () => roof.visible = !roof.visible);
+  btn('Вид', 60, toggleMode);
+
+  renderer.domElement.style.touchAction = 'none';
+  const R = 50;
+  let stickId = null, lookId = null, sx = 0, sy = 0, lx = 0, ly = 0;
+  const el = renderer.domElement;
+  el.addEventListener('touchstart', e => {
+    if (mode !== 'walk') return;
+    for (const t of e.changedTouches) {
+      if (t.clientX < innerWidth * 0.45 && stickId === null) {
+        stickId = t.identifier; sx = t.clientX; sy = t.clientY;
+        css(base, { display: 'block', left: (sx - 60) + 'px', top: (sy - 60) + 'px' });
+        knob.style.left = knob.style.top = '35px';
+      } else if (lookId === null) {
+        lookId = t.identifier; lx = t.clientX; ly = t.clientY;
+      }
+    }
+  }, { passive: true });
+  el.addEventListener('touchmove', e => {
+    if (mode !== 'walk') return;
+    for (const t of e.changedTouches) {
+      if (t.identifier === stickId) {
+        const dx = t.clientX - sx, dy = t.clientY - sy, d = Math.hypot(dx, dy) || 1, k = Math.min(d, R) / d;
+        stick.x = dx * k / R; stick.y = dy * k / R;
+        knob.style.left = (35 + dx * k) + 'px'; knob.style.top = (35 + dy * k) + 'px';
+      } else if (t.identifier === lookId) {
+        camera.rotation.y -= (t.clientX - lx) * 0.005;
+        camera.rotation.x = Math.max(-1.4, Math.min(1.4, camera.rotation.x - (t.clientY - ly) * 0.005));
+        lx = t.clientX; ly = t.clientY;
+      }
+    }
+  }, { passive: true });
+  const end = e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === stickId) { stickId = null; stick.x = stick.y = 0; base.style.display = 'none'; }
+      if (t.identifier === lookId) lookId = null;
+    }
+  };
+  el.addEventListener('touchend', end);
+  el.addEventListener('touchcancel', end);
+}
+
 const clock = new THREE.Clock();
 const dir = new THREE.Vector3();
 
 function update(dt) {
-  if (mode !== 'walk' || !walk.isLocked) return;
+  if (mode !== 'walk' || !(walk.isLocked || isTouch)) return;
   const speed = (keys.ShiftLeft ? 5 : 2.2) * dt;
-  const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
-  const r = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - stick.y;
+  const r = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + stick.x;
   if (!f && !r) return;
 
   camera.getWorldDirection(dir);
