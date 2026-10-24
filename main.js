@@ -145,6 +145,79 @@ function addPiece(minX, maxX, minY, maxY, minZ, maxZ, material = mat.wallOut) {
   }
 }
 
+// ---------- двері: полотна на петлях, відчиняються/зачиняються (кнопка «Двері» / O / клік по дверях) ----------
+const doors = [];
+const doorMats = {
+  white: new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.45 }),
+  panel: new THREE.MeshStandardMaterial({ color: 0xe6e3da, roughness: 0.5 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.5 }),
+  darkPanel: new THREE.MeshStandardMaterial({ color: 0x3b4141, roughness: 0.5 }),
+  chrome: new THREE.MeshStandardMaterial({ color: 0xcfd3d6, metalness: 0.9, roughness: 0.25 }),
+  pvc: new THREE.MeshStandardMaterial({ color: 0xf8f7f3, roughness: 0.3 }),                    // білий пластик (ПВХ)
+  pvcPanel: new THREE.MeshStandardMaterial({ color: 0xececE6, roughness: 0.35 }),
+  glass: new THREE.MeshStandardMaterial({ color: 0xcfe6f2, transparent: true, opacity: 0.38, roughness: 0.05, depthWrite: false }),
+};
+function makeDoor(o, alongX, cx, cz, thick) {
+  const w = o.w - 0.02, h = o.h - 0.01;
+  const root = new THREE.Group();
+  root.position.set(cx, FLOOR_Y, cz);
+  root.rotation.y = alongX ? 0 : -Math.PI / 2;                       // локальний +x — уздовж стіни
+  houseGroup.add(root);
+  const u = o.hinge === 1 ? -1 : 1;                                   // від петель полотно йде в бік u (локально по x)
+  const pivot = new THREE.Group();
+  pivot.position.x = -u * (o.w / 2 - 0.005);
+  root.add(pivot);
+  const dirLocal = alongX ? o.dir : -o.dir;                           // у локальній системі (z) куди відчиняється
+  const openAngle = -dirLocal * u * Math.PI / 2;
+  const [mWhite, mPanel] = o.dark ? [doorMats.dark, doorMats.darkPanel] : [doorMats.white, doorMats.panel];
+  const parts = [];
+  const add = (geo, m, px, py, pz) => { const mesh = new THREE.Mesh(geo, m); mesh.position.set(px, py, pz); mesh.castShadow = true; pivot.add(mesh); parts.push(mesh); return mesh; };
+  if (o.glass) {
+    // пластикове (ПВХ) полотно зі склом у верхній частині: нижня глуха панель, середня й верхня перемички, стійки, склопакет
+    const cx2 = u * w / 2, rail = 0.09, y1 = 1.05, y2 = h - rail;
+    add(new THREE.BoxGeometry(w, y1, 0.05), doorMats.pvc, cx2, y1 / 2, 0);                                 // нижня глуха частина
+    for (const sz of [-1, 1]) add(new THREE.BoxGeometry(w * 0.72, y1 * 0.62, 0.008), doorMats.pvcPanel, cx2, y1 / 2, sz * 0.027);   // тиснена панель
+    add(new THREE.BoxGeometry(w, rail, 0.05), doorMats.pvc, cx2, y1 + rail / 2, 0);                          // середня перемичка
+    add(new THREE.BoxGeometry(w, rail, 0.05), doorMats.pvc, cx2, y2 + rail / 2, 0);                          // верхня перемичка
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(rail, y2 - y1 - rail, 0.05), doorMats.pvc, cx2 + sx * (w / 2 - rail / 2), (y1 + rail + y2) / 2, 0);   // стійки
+    add(new THREE.BoxGeometry(w - 2 * rail, y2 - y1 - rail, 0.012), doorMats.glass, cx2, (y1 + rail + y2) / 2, 0);     // скло
+  } else {
+  add(new THREE.BoxGeometry(w, h, 0.04), mWhite, u * w / 2, h / 2, 0);                                     // полотно
+  for (const sz of [-1, 1]) {                                                                              // філенки з обох боків
+    add(new THREE.BoxGeometry(w * 0.68, h * 0.34, 0.006), mPanel, u * w / 2, h * 0.72, sz * 0.021);
+    add(new THREE.BoxGeometry(w * 0.68, h * 0.34, 0.006), mPanel, u * w / 2, h * 0.3, sz * 0.021);
+  }
+  }
+  for (const sz of [-1, 1]) {
+    add(new THREE.BoxGeometry(0.12, 0.02, 0.05), doorMats.chrome, u * (w - 0.08), o.glass ? 0.95 : 1.0, sz * (o.glass ? 0.04 : 0.035));          // ручка-важіль
+    add(new THREE.BoxGeometry(0.02, 0.02, 0.025), doorMats.chrome, u * (w - 0.03), o.glass ? 0.95 : 1.0, sz * 0.015);
+  }
+  const d = { pivot, parts, openAngle, angle: openAngle, target: 1, dark: !!o.dark, off: true };            // старт: відчинені
+  // колізія закритих дверей: прохід у стіні
+  const half = Math.max(thick, 0.15) / 2;
+  const [wx, wz] = [cx + house.position[0], cz + house.position[1]];
+  d.collider = alongX
+    ? { minX: wx - o.w / 2, maxX: wx + o.w / 2, minZ: wz - half, maxZ: wz + half, off: true }
+    : { minX: wx - half, maxX: wx + half, minZ: wz - o.w / 2, maxZ: wz + o.w / 2, off: true };
+  colliders.push(d.collider);
+  for (const m of parts) m.userData.door = d;
+  pivot.rotation.y = openAngle;
+  doors.push(d);
+}
+function setDoor(d, open) { d.target = open ? 1 : 0; }
+function toggleDoor(d) { setDoor(d, d.target < 0.5); }
+function toggleAllDoors() { const anyOpen = doors.some(d => d.target > 0.5); doors.forEach(d => setDoor(d, !anyOpen)); }
+function updateDoors(dt) {
+  for (const d of doors) {
+    const want = d.target * d.openAngle;
+    const k = Math.min(1, dt * 7);
+    d.angle += (want - d.angle) * k;
+    if (Math.abs(want - d.angle) < 0.002) d.angle = want;
+    d.pivot.rotation.y = d.angle;
+    d.collider.off = Math.abs(d.angle) > 0.35;                       // колізія є, тільки поки двері майже зачинені
+  }
+}
+
 function buildWall(w) {
   const [ax, az] = w.a, [bx, bz] = w.b;
   const alongX = az === bz;
@@ -172,17 +245,13 @@ function buildWall(w) {
     piece(cursor, l, 0, w.h);
     if (o.sill > 0) piece(l, r, 0, o.sill);
     piece(l, r, o.sill + o.h, w.h);
-    if (w.t >= 0.3 || o.type === 'window') {
+    if (w.t >= 0.3 || o.type === 'window' || o.type === 'door') {
       trim(l - T, l, o.sill, o.sill + o.h + T);          // ліва
       trim(r, r + T, o.sill, o.sill + o.h + T);          // права
       trim(l - T, r + T, o.sill + o.h, o.sill + o.h + T); // верх
       if (o.type === 'window') trim(l - T, r + T, o.sill - T, o.sill);  // підвіконня
     }
-    if (o.leaf) {
-      const leaf = alongX
-        ? box(o.w, o.h, 0.06, mat.dark, ax + o.at, FLOOR_Y + o.h / 2, az, houseGroup)
-        : box(0.06, o.h, o.w, mat.dark, ax, FLOOR_Y + o.h / 2, az + o.at, houseGroup);
-    }
+    if (o.type === 'door') makeDoor(o, alongX, alongX ? ax + o.at : ax, alongX ? az : az + o.at, w.t);
     if (o.type === 'window') {
       const gy = FLOOR_Y + o.sill + o.h / 2;
       const pane = new THREE.Mesh(
@@ -390,7 +459,10 @@ houseGroup.add(roof);
   box(w + 2 * o, h, 0.1, mat.foundation, w / 2, h / 2 - 0.1, -o, houseGroup);
   box(w + 2 * o, h, 0.1, mat.foundation, w / 2, h / 2 - 0.1, d + o, houseGroup);
   box(0.1, h, d + 2 * o, mat.foundation, -o, h / 2 - 0.1, d / 2, houseGroup);
-  box(0.1, h, d + 2 * o, mat.foundation, w + o, h / 2 - 0.1, d / 2, houseGroup);
+  // східний цоколь з проломом перед дверима котельні (двері z 4.74..5.64), щоб двері не впиралися в фундамент
+  const dz0 = 5.19 - 0.45, dz1 = 5.19 + 0.45;
+  box(0.1, h, dz0 + o, mat.foundation, w + o, h / 2 - 0.1, (-o + dz0) / 2, houseGroup);
+  box(0.1, h, d + o - dz1, mat.foundation, w + o, h / 2 - 0.1, (dz1 + d + o) / 2, houseGroup);
 })();
 
 // плитка-сходинка біля дверей котельні (східна стіна)
@@ -994,6 +1066,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (e.code === 'KeyR') roof.visible = !roof.visible;
   if (e.code === 'KeyV') toggleMode();
+  if (e.code === 'KeyO') toggleAllDoors();
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
@@ -1017,6 +1090,7 @@ function toggleMode() {
 
 function collides(x, z) {
   for (const c of colliders) {
+    if (c.off) continue;
     if (x > c.minX - RADIUS && x < c.maxX + RADIUS && z > c.minZ - RADIUS && z < c.maxZ + RADIUS) return true;
   }
   return false;
@@ -1039,6 +1113,7 @@ if (isTouch) {
   };
   btn('Дах', 12, () => roof.visible = !roof.visible);
   btn('Вид', 60, toggleMode);
+  btn('Двері', 108, toggleAllDoors);
 
   renderer.domElement.style.touchAction = 'none';
   const R = 50;
@@ -1116,7 +1191,9 @@ addEventListener('resize', () => {
 });
 
 renderer.setAnimationLoop(() => {
-  update(Math.min(clock.getDelta(), 0.1));
+  const dt = Math.min(clock.getDelta(), 0.1);
+  update(dt);
+  updateDoors(dt);
   renderer.render(scene, camera);
 });
 
@@ -1798,7 +1875,7 @@ renderer.setAnimationLoop(() => {
     }
     g.add(grp);
   };
-  sw(8.82, 8.8, 'n');            // кухня-вітальня: біля вхідних дверей (східніше), на південній стіні
+  sw(7.5, 8.8, 'n');             // кухня-вітальня: біля вхідних дверей з боку обіднього столу (західніше), на південній стіні
   sw(3.5, 4.425, 'n');           // мала спальня: на південній стіні, західніше дверей
   sw(6.15, 4.425, 'n');          // дитяча: на південній стіні, східніше дверей з вітальні
   sw(8.925, 7.54, 'w', 1.1, 2);  // ванна + туалет: один подвійний вимикач ззовні, у вітальні, між двома дверима (ліва клавіша — ванна, права — туалет)
@@ -1927,4 +2004,34 @@ renderer.setAnimationLoop(() => {
   }
   // запобіжний клапан і манометр збоку
   put(new THREE.CylinderGeometry(0.02, 0.02, 0.06, 10), red, R + 0.03, 0.55, 0).rotation.z = Math.PI / 2;
+})();
+
+
+// клік по дверях (приціл у центрі екрана, коли курсор захоплено) або дотик по дверях на телефоні: відчинити/зачинити ці двері
+(function doorPicking() {
+  const ray = new THREE.Raycaster();
+  ray.far = 2.6;
+  const meshes = () => doors.flatMap(d => d.parts);
+  const pick = (ndcX, ndcY) => {
+    ray.setFromCamera({ x: ndcX, y: ndcY }, camera);
+    const hit = ray.intersectObjects(meshes(), false)[0];
+    if (hit) toggleDoor(hit.object.userData.door);
+  };
+  renderer.domElement.addEventListener('click', e => { if (mode === 'walk' && walk.isLocked) pick(0, 0); });
+  // приціл-крапка для комп'ютера
+  const dot = document.createElement('div');
+  Object.assign(dot.style, { position: 'fixed', left: '50%', top: '50%', width: '6px', height: '6px', margin: '-3px 0 0 -3px', borderRadius: '50%', background: 'rgba(255,255,255,.8)', boxShadow: '0 0 2px #000', pointerEvents: 'none', display: 'none' });
+  document.body.appendChild(dot);
+  walk.addEventListener('lock', () => dot.style.display = 'block');
+  walk.addEventListener('unlock', () => dot.style.display = 'none');
+  // тап на телефоні: короткий дотик без руху
+  let t0 = null;
+  renderer.domElement.addEventListener('touchstart', e => { if (e.touches.length === 1) t0 = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: performance.now() }; else t0 = null; }, { passive: true });
+  renderer.domElement.addEventListener('touchend', e => {
+    if (!t0 || mode !== 'walk') return;
+    const t = e.changedTouches[0];
+    if (Math.hypot(t.clientX - t0.x, t.clientY - t0.y) < 10 && performance.now() - t0.t < 350)
+      pick((t.clientX / innerWidth) * 2 - 1, -(t.clientY / innerHeight) * 2 + 1);
+    t0 = null;
+  });
 })();
