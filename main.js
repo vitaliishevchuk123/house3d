@@ -193,6 +193,9 @@ function makeDoor(o, alongX, cx, cz, thick) {
     add(new THREE.BoxGeometry(0.02, 0.02, 0.025), doorMats.chrome, u * (w - 0.03), o.glass ? 0.95 : 1.0, sz * 0.015);
   }
   const d = { pivot, parts, openAngle, angle: openAngle, target: 1, dark: !!o.dark, off: true };            // старт: відчинені
+  // поріг: смужка підлоги під дверима (матеріал — як у кімнати, куди ведуть двері; stone — каменний на вулицю)
+  const thr = Math.max(thick, 0.15);
+  d.thr = { kind: o.floor || 'oak', x0: alongX ? cx - o.w / 2 : cx - thr / 2, x1: alongX ? cx + o.w / 2 : cx + thr / 2, z0: alongX ? cz - thr / 2 : cz - o.w / 2, z1: alongX ? cz + thr / 2 : cz + o.w / 2 };
   // колізія закритих дверей: прохід у стіні
   const half = Math.max(thick, 0.15) / 2;
   const [wx, wz] = [cx + house.position[0], cz + house.position[1]];
@@ -413,6 +416,33 @@ for (const f of floors) {
   if (!j.includes('z1')) skirting('x', f.z1, f.x0, f.x1, -1);
   if (!j.includes('x0')) skirting('z', f.x0, f.z0, f.z1, 1);
   if (!j.includes('x1')) skirting('z', f.x1, f.z0, f.z1, -1);
+}
+
+// пороги під дверима: прибирають видиму смугу чорнової підлоги між кімнатами; текстури вирівняні у світових координатах з підлогою кімнат
+for (const d of doors) {
+  const t = d.thr, w = t.x1 - t.x0, h = t.z1 - t.z0;
+  let m;
+  if (t.kind === 'stone') m = new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1 });
+  else {
+    const sc = 2.4, tex = (t.kind === 'tile' ? oakTile : oak).clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(w / sc, h / sc);
+    tex.offset.set(t.x0 / sc, -t.z1 / sc);
+    m = new THREE.MeshStandardMaterial({ map: tex, roughness: t.kind === 'tile' ? 0.35 : 0.55, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  }
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), m);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set((t.x0 + t.x1) / 2, FLOOR_Y + 0.004, (t.z0 + t.z1) / 2);
+  mesh.receiveShadow = true;
+  houseGroup.add(mesh);
+}
+// котельня: бетонна підлога (раніше була видима чорнова підлога)
+{
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(10.8 - 9.075, 5.8 - 4.575), new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set((9.075 + 10.8) / 2, FLOOR_Y + 0.003, (4.575 + 5.8) / 2);
+  m.receiveShadow = true;
+  houseGroup.add(m);
 }
 
 // дах (двосхилий, гребінь уздовж x)
