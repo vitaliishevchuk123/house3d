@@ -1570,6 +1570,80 @@ let kRoof;
 
 
 
+// Renault Scenic II (чорний компактвен, ~2007): стоїть на колійних доріжках біля воріт носом до хати.
+// Збирається в локальних координатах: вперед = +x, ширина = z, вгору = y; довжина 4.25 м, ширина 1.81 м, висота 1.62 м
+(function buildCar() {
+  const car = new THREE.Group();
+  const paint = new THREE.MeshPhysicalMaterial({ color: 0x23282f, roughness: 0.4, metalness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.2 });
+  const glassM = new THREE.MeshStandardMaterial({ color: 0x151d24, roughness: 0.1, metalness: 0.2 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.6 });
+  const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1b, roughness: 0.95 });
+  const alloy = new THREE.MeshStandardMaterial({ color: 0xc9ced2, roughness: 0.35, metalness: 0.2 });
+  const headM = new THREE.MeshStandardMaterial({ color: 0xe8eef2, roughness: 0.2, emissive: 0x6a7075, emissiveIntensity: 0.4 });
+  const tailM = new THREE.MeshStandardMaterial({ color: 0xb01818, roughness: 0.3, emissive: 0x500808, emissiveIntensity: 0.6 });
+  const plateM = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.5 });
+  const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; car.add(o); return o; };
+
+  // кузов: профіль збоку з арками під колеса, видавлений на ширину з фасками
+  const xf = 1.29, xr = -1.40, ar = 0.38;
+  const pts = [[-2.10, 0.30], [xr - ar, 0.30]];
+  for (let i = 0; i <= 12; i++) { const t = Math.PI - Math.PI * i / 12; pts.push([xr + ar * Math.cos(t), 0.31 + ar * Math.sin(t)]); }
+  pts.push([xr + ar, 0.30], [xf - ar, 0.30]);
+  for (let i = 0; i <= 12; i++) { const t = Math.PI - Math.PI * i / 12; pts.push([xf + ar * Math.cos(t), 0.31 + ar * Math.sin(t)]); }
+  pts.push([xf + ar, 0.30], [2.10, 0.30], [2.12, 0.52], [2.08, 0.78], [1.55, 0.92], [1.05, 0.98], [-1.95, 1.02], [-2.08, 0.95], [-2.12, 0.60]);
+  const body = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1]))), { depth: 1.66, bevelEnabled: true, bevelThickness: 0.07, bevelSize: 0.07, bevelSegments: 2, steps: 1 }),
+    paint);
+  body.geometry.translate(0, 0, -0.83);
+  body.castShadow = true;
+  car.add(body);
+  // салон: затоновані скло, вужче за кузов
+  const cabin = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(new THREE.Shape([[1.05, 0.98], [0.40, 1.58], [-1.75, 1.60], [-2.03, 1.03]].map(p => new THREE.Vector2(p[0], p[1]))), { depth: 1.4, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.03, bevelSegments: 1 }),
+    glassM);
+  cabin.geometry.translate(0, 0, -0.7);
+  cabin.castShadow = true;
+  car.add(cabin);
+  add(new THREE.BoxGeometry(2.2, 0.05, 1.46), paint, -0.68, 1.61, 0).rotation.z = -0.005;         // дах
+  const seg = (x0, y0, x1, y1, z, t) => {                                                          // стійка між двома точками профілю
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    const o = add(new THREE.BoxGeometry(len, t, 0.06), paint, (x0 + x1) / 2, (y0 + y1) / 2, z);
+    o.rotation.z = Math.atan2(y1 - y0, x1 - x0);
+  };
+  for (const z of [-0.74, 0.74]) {
+    seg(1.05, 0.98, 0.40, 1.58, z, 0.07);                                                          // A
+    add(new THREE.BoxGeometry(0.08, 0.62, 0.06), paint, -0.38, 1.29, z);                          // B
+    seg(-1.75, 1.60, -2.03, 1.03, z, 0.09);                                                        // C
+    add(new THREE.BoxGeometry(0.1, 0.1, 0.18), black, 0.98, 1.05, z * 1.3);                       // дзеркала
+    add(new THREE.BoxGeometry(3.3, 0.025, 0.012), alloy, -0.1, 0.62, z * 1.19);                   // хромована смужка по борту
+  }
+  // світло, решітка, номери, бампери
+  for (const z of [-0.6, 0.6]) {
+    add(new THREE.BoxGeometry(0.06, 0.14, 0.34), headM, 2.10, 0.74, z);
+    add(new THREE.BoxGeometry(0.05, 0.36, 0.14), tailM, -2.12, 0.92, z * 1.17);
+  }
+  add(new THREE.BoxGeometry(0.05, 0.16, 0.7), black, 2.13, 0.56, 0);
+  add(new THREE.BoxGeometry(0.05, 0.1, 1.2), black, 2.13, 0.38, 0);
+  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, 2.16, 0.43, 0);
+  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, -2.16, 0.56, 0);
+  // колеса: шина, диск, п'ять спиць
+  for (const x of [xf, xr]) for (const z of [-0.76, 0.76]) {
+    const w = new THREE.Group();
+    w.position.set(x, 0.31, z);
+    car.add(w);
+    const part = (geo, m, px, py, pz) => { const o = new THREE.Mesh(geo, m); o.position.set(px, py, pz); o.castShadow = true; w.add(o); return o; };
+    part(new THREE.CylinderGeometry(0.31, 0.31, 0.2, 24), tyre, 0, 0, 0).rotation.x = Math.PI / 2;
+    const face = Math.sign(z) * 0.101;
+    part(new THREE.CylinderGeometry(0.21, 0.21, 0.01, 24), alloy, 0, 0, face).rotation.x = Math.PI / 2;
+    part(new THREE.CylinderGeometry(0.06, 0.06, 0.015, 16), black, 0, 0, face * 1.1).rotation.x = Math.PI / 2;
+    for (let k = 0; k < 5; k++) part(new THREE.BoxGeometry(0.38, 0.03, 0.012), black, 0, 0, face * 1.08).rotation.z = k * Math.PI / 5;
+  }
+  car.position.set(plot.gate.x, 0.04, 36);
+  car.rotation.y = Math.PI / 2;                                                                    // носом на північ, до хати
+  scene.add(car);
+  colliders.push({ minX: plot.gate.x - 0.95, maxX: plot.gate.x + 0.95, minZ: 36 - 2.2, maxZ: 36 + 2.2 });
+})();
+
 function addCollider(minX, maxX, minZ, maxZ) {
   colliders.push(worldBox(minX, maxX, minZ, maxZ));
 }
@@ -1583,7 +1657,7 @@ orbit.enabled = false;
 let mode = 'walk';
 
 const EYE = 1.7, RADIUS = 0.3;
-camera.position.set(plot.gate.x, EYE, plot.d / 2 - 2);
+camera.position.set(plot.wicket.x, EYE, plot.d / 2 - 2);
 camera.lookAt(0, EYE, 0);
 
 const isTouch = matchMedia('(pointer: coarse)').matches;
