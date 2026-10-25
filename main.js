@@ -19,11 +19,12 @@ document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8c8c82, 0.8));
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
-sun.position.set(25, 40, 20);
+sun.position.set(house.position[0] + 25, 40, house.position[1] + 20);
+sun.target.position.set(house.position[0], 0, house.position[1]);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, near: 1, far: 120 });
-scene.add(sun);
+scene.add(sun, sun.target);
 
 // ---------- матеріали ----------
 const mat = {
@@ -40,6 +41,37 @@ const mat = {
   trunk: new THREE.MeshStandardMaterial({ color: 0x5b4328 }),
   leaf: new THREE.MeshStandardMaterial({ color: 0x3f7a35, roughness: 1 }),
 };
+
+// світла «стара» цегла для цоколя й ґанку: розсипчастий кладка в півцеглини, кольори від рожевого до кремового, світлий розчин
+const BRICK_SCALE = 1.2;   // метрів на один квадрат текстури (5 цеглин по ширині, 16 рядів)
+function brickTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#bdb6ab';
+  g.fillRect(0, 0, 512, 512);
+  const palette = ['#c9a38f', '#b98b78', '#d8bfa8', '#a8826f', '#cdb7a5', '#c2998a', '#dccbb6'];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const bw = 512 / 5, bh = 512 / 16, j = 3;
+  for (let r = 0; r < 16; r++) {
+    for (let i = -1; i < 6; i++) {
+      const x = i * bw + (r % 2 ? bw / 2 : 0);
+      g.fillStyle = palette[Math.floor(rnd() * palette.length)];
+      g.fillRect(x + j / 2, r * bh + j / 2, bw - j, bh - j);
+      for (let k = 0; k < 14; k++) {                                   // крапинки для живої фактури
+        g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.12)' : 'rgba(90,60,50,0.14)';
+        g.fillRect(x + rnd() * bw, r * bh + rnd() * bh, 2 + rnd() * 4, 1 + rnd() * 2);
+      }
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+mat.foundation = new THREE.MeshStandardMaterial({ map: brickTexture(), roughness: 0.95 });
 
 function grassTexture() {
   const c = document.createElement('canvas');
@@ -74,8 +106,50 @@ outer.position.y = -0.02;
 outer.receiveShadow = true;
 scene.add(outer);
 
+// вулиця вздовж південного паркану: смуга газону, асфальт (7 м), смуга газону з протилежного боку
+const STREET = { z0: plot.d / 2 + 3, w: 7 };            // 3 м газону від паркану, далі асфальт
+(function buildStreet() {
+  const strip = (zc, h) => {
+    const t = gt.clone(); t.needsUpdate = true; t.repeat.set(300, h / 2);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(600, h), new THREE.MeshStandardMaterial({ map: t, roughness: 1 }));
+    m.rotation.x = -Math.PI / 2; m.position.set(0, 0.005, zc); m.receiveShadow = true; scene.add(m);
+  };
+  strip(plot.d / 2 + 1.5, 3);
+  strip(STREET.z0 + STREET.w + 1.5, 3);
+  // асфальт: темно-сіре покриття з дрібною зернистістю
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#3d3f43';
+  g.fillRect(0, 0, 256, 256);
+  let seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 2600; i++) {
+    const v = 50 + Math.floor(rnd() * 40);
+    g.fillStyle = `rgba(${v},${v},${v + 2},0.55)`;
+    g.fillRect(rnd() * 256, rnd() * 256, 1 + rnd() * 2, 1 + rnd() * 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.repeat.set(150, STREET.w / 4);
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(600, STREET.w), new THREE.MeshStandardMaterial({ map: t, roughness: 0.95 }));
+  road.rotation.x = -Math.PI / 2;
+  road.position.set(0, 0.01, STREET.z0 + STREET.w / 2);
+  road.receiveShadow = true;
+  scene.add(road);
+})();
+
 function box(w, h, d, material, x, y, z, parent = scene) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  const geo = new THREE.BoxGeometry(w, h, d);
+  if (material === mat.foundation) {                               // цегла: UV у метрах, щоб кладка не розтягувалась на різних боксах
+    const p = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < p.count; i++) {
+      const f = Math.floor(i / 4), px = p.getX(i) + x, py = p.getY(i) + y, pz = p.getZ(i) + z;
+      uv.setXY(i, (f < 2 ? pz : px) / BRICK_SCALE, (f === 2 || f === 3 ? pz : py) / BRICK_SCALE);
+    }
+  }
+  const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
   m.castShadow = m.receiveShadow = true;
   parent.add(m);
@@ -86,38 +160,116 @@ function box(w, h, d, material, x, y, z, parent = scene) {
 (function buildFence() {
   const hw = plot.w / 2, hd = plot.d / 2, fh = plot.fenceHeight, step = 2.5;
   const gx0 = plot.gate.x - plot.gate.width / 2, gx1 = plot.gate.x + plot.gate.width / 2;
+  const wx0 = plot.wicket.x - plot.wicket.width / 2, wx1 = plot.wicket.x + plot.wicket.width / 2;
 
-  function run(x1, z1, x2, z2, skip) {
+  // сітка-рабиця: оцинковані круглі стовпи, натяжний дріт знизу, ромбічна сітка на прозорій текстурі
+  const galv = new THREE.MeshStandardMaterial({ color: 0xaab0b4, roughness: 0.5, metalness: 0.2 });
+  const meshTex = (() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    g.strokeStyle = '#c9cdcf';
+    g.lineWidth = 2.2;
+    for (let k = -2; k <= 2; k++) {
+      g.beginPath(); g.moveTo(-8, 32 * k - 8); g.lineTo(72, 32 * k + 72); g.stroke();
+      g.beginPath(); g.moveTo(-8, 32 * k + 72); g.lineTo(72, 32 * k - 8); g.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 8;
+    return t;
+  })();
+  const CELL = 0.16;   // метрів на одну плитку текстури (2 × 2 ромби по ~8 см)
+  function wireMesh(l, h, x, y, z, vertical) {
+    const t = meshTex.clone(); t.needsUpdate = true; t.repeat.set(l / CELL, h / CELL);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(l, h), new THREE.MeshStandardMaterial({ map: t, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide, roughness: 0.6 }));
+    m.position.set(x, y, z);
+    if (vertical) m.rotation.y = Math.PI / 2;
+    scene.add(m);
+  }
+  const pipe = (r, l, x, y, z, axis) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, l, 8), galv);
+    m.position.set(x, y, z);
+    if (axis === 'x') m.rotation.z = Math.PI / 2; else if (axis === 'z') m.rotation.x = Math.PI / 2;
+    m.castShadow = true;
+    scene.add(m);
+  };
+
+  function run(x1, z1, x2, z2, openings = []) {
     const len = Math.hypot(x2 - x1, z2 - z1);
     const n = Math.round(len / step);
     const dx = (x2 - x1) / len, dz = (z2 - z1) / len;
     const rot = Math.atan2(-dz, dx);
     for (let i = 0; i <= n; i++) {
       const x = x1 + dx * (len * i / n), z = z1 + dz * (len * i / n);
-      if (skip && skip(x)) continue;
-      box(0.12, fh, 0.12, mat.wood, x, fh / 2, z);
+      if (openings.some(([a, b]) => x > a + 0.01 && x < b - 0.01)) continue;
+      pipe(0.035, fh + 0.1, x, (fh + 0.1) / 2, z);
     }
     // дошки між стовпами
-    const segs = skip ? [[x1, gx0], [gx1, x2]] : [[x1, x2]];
+    const segs = [];
+    let cur = x1;
+    for (const [a, b] of openings) { segs.push([cur, a]); cur = b; }
+    segs.push([cur, x2]);
     for (const [a, b] of segs) {
       const horizontal = z1 === z2;
       const l = horizontal ? Math.abs(b - a) : len;
       if (l <= 0) continue;
       const cx = horizontal ? (a + b) / 2 : x1;
       const cz = horizontal ? z1 : (z1 + z2) / 2;
-      for (const y of [fh * 0.3, fh * 0.75]) {
-        horizontal ? box(l, 0.1, 0.04, mat.wood, cx, y, cz) : box(0.04, 0.1, l, mat.wood, cx, y, cz);
-      }
+      wireMesh(l, fh - 0.1, cx, 0.1 + (fh - 0.1) / 2, cz, !horizontal);
+      pipe(0.007, l, cx, 0.1, cz, horizontal ? 'x' : 'z');           // натяжний дріт знизу
     }
   }
   run(-hw, -hd, hw, -hd);
-  run(-hw, hd, hw, hd, x => x > gx0 + 0.01 && x < gx1 - 0.01);
+  run(-hw, hd, hw, hd, [[wx0, wx1], [gx0, gx1]]);
+
+  // брама і хвіртка: мінімалістичні, зашиті графітовим профнастилом на сталевих стовпах, хвіртка впритул до брами
+  const profTex = () => {
+    // трапецієвидний профнастил графітового кольору: 12 хвиль на текстуру — широка полиця, скоси й вузька грань
+    const c = document.createElement('canvas');
+    c.width = 384; c.height = 16;
+    const g = c.getContext('2d');
+    const per = 384 / 12;
+    const shades = [[0, 11, '#4a505a'], [11, 14, '#3a3f47'], [14, 17, '#626975'], [17, 20, '#33383f'], [20, 32, '#4a505a']];
+    for (let i = 0; i < 12; i++) for (const [x0, x1, col] of shades) { g.fillStyle = col; g.fillRect(i * per + x0, 0, x1 - x0, 16); }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  };
+  const sheetTex = profTex();
+  const sheet = w => { const t = sheetTex.clone(); t.needsUpdate = true; t.repeat.set(w / 1.2, 1); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6, metalness: 0 }); };
+  const steel = new THREE.MeshStandardMaterial({ color: 0x33383f, roughness: 0.6, metalness: 0 });
+  const GH = 1.9;                                                         // висота полотна
+  const post = x => { box(0.14, 2.1, 0.14, steel, x, 1.05, hd); box(0.18, 0.04, 0.18, steel, x, 2.12, hd); };
+  for (const x of [gx0, gx1, wx0, wx1]) post(x);
+  // брама: дві стулки, зачинена
+  const leafW = (gx1 - gx0) / 2 - 0.1;
+  for (const s of [-1, 1]) {
+    const cx = plot.gate.x + s * (leafW / 2 + 0.03);
+    box(leafW, GH, 0.04, sheet(leafW), cx, 0.1 + GH / 2, hd);
+    box(leafW, 0.06, 0.06, steel, cx, 0.1 + GH - 0.03, hd);                // верхня обв'язка
+    box(leafW, 0.06, 0.06, steel, cx, 0.13, hd);                            // нижня
+  }
+  box(0.04, 0.5, 0.06, steel, plot.gate.x - 0.1, 1.0, hd + 0.04);           // ручки по центру
+  box(0.04, 0.5, 0.06, steel, plot.gate.x + 0.1, 1.0, hd + 0.04);
+  // хвіртка: прочинена всередину ділянки
+  const wl = plot.wicket.width - 0.1;
+  const wp = new THREE.Group();
+  wp.position.set(wx0 + 0.07, 0, hd);
+  wp.rotation.y = 1.4;
+  scene.add(wp);
+  box(wl, GH, 0.04, sheet(wl), wl / 2 + 0.02, 0.1 + GH / 2, 0, wp);
+  box(wl, 0.06, 0.06, steel, wl / 2 + 0.02, 0.1 + GH - 0.03, 0, wp);
+  box(wl, 0.06, 0.06, steel, wl / 2 + 0.02, 0.13, 0, wp);
+  box(0.04, 0.4, 0.06, steel, wl - 0.1, 1.0, 0.04, wp);
   run(-hw, -hd, -hw, hd);
   run(hw, -hd, hw, hd);
 })();
 
 // дерева
-[[-18, -12], [17, -14], [-20, 6], [19, 10], [-12, 15], [12, -4]].forEach(([x, z]) => {
+[[-12, -32], [11, -28], [-11, -12], [12, -3], [-11, 6], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
   box(0.35, 3, 0.35, mat.trunk, x, 1.5, z);
   const crown = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), mat.leaf);
   crown.position.set(x, 4.6, z);
@@ -128,7 +280,10 @@ function box(w, h, d, material, x, y, z, parent = scene) {
 // ---------- хата ----------
 const houseGroup = new THREE.Group();
 houseGroup.position.set(house.position[0], 0, house.position[1]);
+houseGroup.rotation.y = Math.PI;                                  // тераса ззаду (на північ), глуха стіна до вулиці
 scene.add(houseGroup);
+// локальний AABB хати → світовий (поворот на 180°)
+const worldBox = (a, b, c, d) => ({ minX: house.position[0] - b, maxX: house.position[0] - a, minZ: house.position[1] - d, maxZ: house.position[1] - c });
 
 box(house.w + 0.4, 0.2, house.d + 0.4, mat.floor, house.w / 2, 0.1 - 0.0, house.d / 2, houseGroup).receiveShadow = true;
 const FLOOR_Y = 0.2;
@@ -138,10 +293,7 @@ function addPiece(minX, maxX, minY, maxY, minZ, maxZ, material = mat.wallOut) {
   box(maxX - minX, maxY - minY, maxZ - minZ, material,
     (minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2, houseGroup);
   if (minY < 1.0) {
-    colliders.push({
-      minX: minX + house.position[0], maxX: maxX + house.position[0],
-      minZ: minZ + house.position[1], maxZ: maxZ + house.position[1],
-    });
+    colliders.push(worldBox(minX, maxX, minZ, maxZ));
   }
 }
 
@@ -198,7 +350,7 @@ function makeDoor(o, alongX, cx, cz, thick) {
   d.thr = { kind: o.floor || 'oak', x0: alongX ? cx - o.w / 2 : cx - thr / 2, x1: alongX ? cx + o.w / 2 : cx + thr / 2, z0: alongX ? cz - thr / 2 : cz - o.w / 2, z1: alongX ? cz + thr / 2 : cz + o.w / 2 };
   // колізія закритих дверей: прохід у стіні
   const half = Math.max(thick, 0.15) / 2;
-  const [wx, wz] = [cx + house.position[0], cz + house.position[1]];
+  const [wx, wz] = [house.position[0] - cx, house.position[1] - cz];
   d.collider = alongX
     ? { minX: wx - o.w / 2, maxX: wx + o.w / 2, minZ: wz - half, maxZ: wz + half, off: true }
     : { minX: wx - half, maxX: wx + half, minZ: wz - o.w / 2, maxZ: wz + o.w / 2, off: true };
@@ -1037,17 +1189,17 @@ const art = (() => {
 
 // ґанок: настил, білі колони, перила, дашок, сходинка
 (function buildPorch() {
-  const x0 = 5.0, x1 = 11.4, z0 = 9.2, z1 = 11.4, deckTop = 0.3;
+  const x0 = 2.9, x1 = 9.3, z0 = 9.2, z1 = 11.4, deckTop = 0.3;
   const g = houseGroup;
   box(x1 - x0, deckTop, z1 - z0, mat.foundation, (x0 + x1) / 2, deckTop / 2, (z0 + z1) / 2, g);
-  box(1.6, 0.15, 0.5, mat.wood, 8.25, 0.075, z1 + 0.25, g); // сходинка до входу
+  box(1.6, 0.15, 0.5, mat.foundation, 8.25, 0.075, z1 + 0.25, g); // сходинка до входу (цегла, як тераса)
 
-  const colX = [5.3, 7.2, 9.3, 11.1], colH = 2.4, zc = z1 - 0.2;
+  const colX = [3.2, 5.2, 7.2, 9.1], colH = 2.4, zc = z1 - 0.2;
   for (const x of colX) {
     box(0.16, colH, 0.16, mat.white, x, deckTop + colH / 2, zc, g);
     addCollider(x - 0.1, x + 0.1, zc - 0.1, zc + 0.1);
   }
-  // перила: між колонами, крім проходу до сходинки (7.2..9.3), і з боків
+  // перила: між колонами, крім проходу до сходинки (7.2..9.1, двері скраю східного кінця), і з боків
   const rail = (xa, za, xb, zb) => {
     const len = Math.hypot(xb - xa, zb - za), cx = (xa + xb) / 2, cz = (za + zb) / 2;
     const alongX = za === zb;
@@ -1062,10 +1214,11 @@ const art = (() => {
     alongX ? addCollider(Math.min(xa, xb), Math.max(xa, xb), cz - 0.05, cz + 0.05)
            : addCollider(cx - 0.05, cx + 0.05, Math.min(za, zb), Math.max(za, zb));
   };
-  rail(5.3, zc, 7.2, zc);
-  rail(9.3, zc, 11.1, zc);
-  rail(5.3, z0, 5.3, zc);
-  rail(11.1, z0, 11.1, zc);
+  rail(3.2, zc, 5.2, zc);
+  rail(5.2, zc, 7.2, zc);
+  rail(3.2, z0, 3.2, 9.8);                 // східний бік з проходом (z 9.8..10.6) від доріжки вздовж стіни
+  rail(3.2, 10.6, 3.2, zc);
+  rail(9.1, z0, 9.1, zc);
 
   // дашок ґанку: схил від стіни вниз до колон, тим самим темно-коричневим
   const rz0 = z0 - 0.2, rz1 = z1 + 0.1, hi = 2.95, lo = 2.62;
@@ -1075,23 +1228,268 @@ const art = (() => {
   box(x1 - x0 + 0.5, 0.18, 0.05, mat.white, (x0 + x1) / 2, lo - 0.05, rz1 + 0.02, g);
 })();
 
-// доріжка від воріт до ґанку (цегляна)
-(function buildPath() {
-  const hx = house.position[0], hz = house.position[1];
-  const px = hx + 8.25, pz = hz + 12.1;      // низ сходинки
-  const gx = plot.gate.x, gz = plot.d / 2;
-  const w = 1.4, y = 0.02;
-  box(w, 0.04, gz - 11, mat.brick, gx, y, (gz + 11) / 2);            // від воріт на північ
-  box(Math.abs(px - gx) + w, 0.04, w, mat.brick, (px + gx) / 2, y, 11); // поперек до ґанку
-  box(w, 0.04, 11 + w / 2 - pz, mat.brick, px, y, (pz + 11 + w / 2) / 2);   // до сходинки
+// ґанок: два крісла-гойдалки й круглий столик у західній частині (подалі від дверей, обличчям у двір)
+(function buildPorchFurniture() {
+  const g = houseGroup, deckTop = 0.3;
+  const frame = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.6 });
+  const seatM = new THREE.MeshStandardMaterial({ color: 0xb08a5e, roughness: 0.7 });
+  const cushion = new THREE.MeshStandardMaterial({ color: 0x65777a, roughness: 0.95 });   // подушка в колір фасаду
+  const mk = (geo, m, x, y, z, parent) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = o.receiveShadow = true; parent.add(o); return o; };
+
+  const rocker = (x, z, rotY) => {
+    const c = new THREE.Group();
+    c.position.set(x, deckTop, z);
+    c.rotation.y = rotY;                                            // локальний +z — куди дивиться крісло
+    g.add(c);
+    const R = 1.0, arc = 0.95;
+    for (const sx of [-1, 1]) {                                      // дві дуги-полози, нижня точка торкається настилу
+      const hold = new THREE.Group();
+      hold.rotation.y = Math.PI / 2;                                 // дуга лежить у площині y-z
+      hold.position.set(sx * 0.3, R, 0);
+      const t = mk(new THREE.TorusGeometry(R, 0.018, 6, 28, arc), frame, 0, 0, 0, hold);
+      t.rotation.z = -Math.PI / 2 - arc / 2;
+      c.add(hold);
+      for (const sz of [-0.22, 0.24]) mk(new THREE.BoxGeometry(0.035, 0.42, 0.035), frame, sx * 0.3, 0.23, sz, c);   // ніжки до полоза
+      mk(new THREE.BoxGeometry(0.04, 0.04, 0.55), frame, sx * 0.3, 0.64, 0.0, c);                                      // підлокітник
+      mk(new THREE.BoxGeometry(0.035, 0.24, 0.035), frame, sx * 0.3, 0.52, 0.24, c);                                   // передня стійка підлокітника
+    }
+    mk(new THREE.BoxGeometry(0.6, 0.04, 0.5), seatM, 0, 0.44, 0.0, c);                                                  // сидіння
+    mk(new THREE.BoxGeometry(0.5, 0.05, 0.42), cushion, 0, 0.485, 0.02, c);                                             // подушка
+    const back = new THREE.Group();
+    back.position.set(0, 0.46, -0.25);
+    back.rotation.x = -0.22;                                                                                            // нахил спинки назад
+    c.add(back);
+    for (let i = 0; i < 7; i++) mk(new THREE.BoxGeometry(0.045, 0.62, 0.025), frame, -0.24 + i * 0.08, 0.31, 0, back);  // планки спинки
+    mk(new THREE.BoxGeometry(0.6, 0.06, 0.04), frame, 0, 0.64, 0, back);                                                // верхня планка
+    mk(new THREE.BoxGeometry(0.6, 0.04, 0.04), frame, 0, 0.1, 0, back);
+    addCollider(x - 0.33, x + 0.33, z - 0.33, z + 0.33);
+  };
+  rocker(5.0, 10.2, 0.4);
+  rocker(6.1, 10.2, -0.4);
+
+  // круглий столик між кріслами
+  const tx = 5.55, tz = 10.2;
+  mk(new THREE.CylinderGeometry(0.27, 0.27, 0.035, 32), seatM, tx, deckTop + 0.55, tz, g);
+  mk(new THREE.CylinderGeometry(0.03, 0.03, 0.52, 12), frame, tx, deckTop + 0.285, tz, g);
+  mk(new THREE.CylinderGeometry(0.17, 0.2, 0.03, 24), frame, tx, deckTop + 0.015, tz, g);
+  mk(new THREE.CylinderGeometry(0.04, 0.032, 0.09, 16), new THREE.MeshStandardMaterial({ color: 0xf6f4ee, roughness: 0.4 }), tx - 0.05, deckTop + 0.62, tz + 0.03, g);   // чашка
+  addCollider(tx - 0.27, tx + 0.27, tz - 0.27, tz + 0.27);
 })();
 
+// літня кухня (господарська будівля) праворуч від хати за смугою проїзду: у тому ж стилі, видовжена вздовж ділянки (гребінь даху уздовж z),
+// 2 кімнати зі своїми дверима до смуги проїзду (ПД: інструменти, ПН: одяг у коробках і шафи).
+// Будівля збирається в локальних координатах x 0..W (довга вісь), z 0..D (поперек, z=0 — стіна з дверима до смуги), а група повернута на 90°:
+// локальна (x, z) → світова (KX + z, KZ - x)
+const KITCHEN = { x: 7.5, z: 33.0, w: 7.4, d: 4.0 };
+let kRoof;
+(function buildSummerKitchen() {
+  const KX = KITCHEN.x, KZ = KITCHEN.z, W = KITCHEN.w, D = KITCHEN.d;
+  const H = 2.5, T = 0.3, F = FLOOR_Y, o = 0.4, rise = 1.3, PX = 3.7;           // PX — перегородка між кімнатами
+  const kb = new THREE.Group();
+  kb.position.set(KX, 0, KZ);
+  kb.rotation.y = Math.PI / 2;
+  scene.add(kb);
+  const M = (c, r = 0.8, extra = {}) => new THREE.MeshStandardMaterial({ color: c, roughness: r, ...extra });
+  const lime = M(0xe8e4da, 0.95), concrete = M(0x8a8d8c, 1);
+  const wood = M(0x9a7248), darkWood = M(0x6b4a2f), pegboard = M(0xb89968, 0.9), metal = M(0x7c8184, 0.4, { metalness: 0.6 });
+  const dark = M(0x303535, 0.5), red = M(0xc03a2b, 0.5), carton = M(0xb88f5c, 0.9), tape = M(0xd8c9a5, 0.8);
+  const bx = (x0, x1, y0, y1, z0, z1, m) => box(x1 - x0, y1 - y0, z1 - z0, m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2, kb);
+  const col = (x0, x1, z0, z1) => colliders.push({ minX: KX + z0, maxX: KX + z1, minZ: KZ - x1, maxZ: KZ - x0 });
+  const fb = (x0, x1, y0, y1, z0, z1, m, c) => { bx(x0, x1, F + y0, F + y1, z0, z1, m); if (c) col(x0, x1, z0, z1); };   // y — від підлоги
+  const cyl = (r, h, m, x, y, z, rt = r) => { const o2 = new THREE.Mesh(new THREE.CylinderGeometry(rt, r, h, 14), m); o2.position.set(x, F + y + h / 2, z); o2.castShadow = true; kb.add(o2); return o2; };
+
+  // плита, цегляний цоколь по периметру (з розривами під дверима) і східчаки
+  bx(0, W, 0, F, 0, D, concrete);
+  const dc = [1.85, 5.55];
+  bx(-0.08, 0, 0, 0.5, -0.08, D + 0.08, mat.foundation);
+  bx(W, W + 0.08, 0, 0.5, -0.08, D + 0.08, mat.foundation);
+  bx(0, W, 0, 0.5, D, D + 0.08, mat.foundation);
+  for (const [a, b] of [[0, dc[0] - 0.55], [dc[0] + 0.55, dc[1] - 0.55], [dc[1] + 0.55, W]]) bx(a, b, 0, 0.5, -0.08, 0, mat.foundation);
+  for (const c of dc) bx(c - 0.55, c + 0.55, 0, 0.12, -0.5, 0, mat.foundation);
+
+  // стіни: зовнішня половина — фасад, внутрішня — побілка
+  const wall = (axis, o0, o1, a0, a1, ops, outer) => {
+    const mid = (o0 + o1) / 2;
+    const halves = outer === 'lo' ? [[o0, mid, mat.wallOut], [mid, o1, lime]] : outer === 'hi' ? [[o0, mid, lime], [mid, o1, mat.wallOut]] : [[o0, o1, lime]];
+    const piece = (s0, s1, y0, y1) => {
+      if (s1 - s0 < 1e-4 || y1 - y0 < 1e-4) return;
+      for (const [p0, p1, m] of halves) axis === 'x' ? bx(s0, s1, F + y0, F + y1, p0, p1, m) : bx(p0, p1, F + y0, F + y1, s0, s1, m);
+      if (y0 < 1.0) axis === 'x' ? col(s0, s1, o0, o1) : col(o0, o1, s0, s1);
+    };
+    let cur = a0;
+    for (const op of ops) {
+      piece(cur, op.c - op.w / 2, 0, H);
+      piece(op.c - op.w / 2, op.c + op.w / 2, 0, op.sill);
+      piece(op.c - op.w / 2, op.c + op.w / 2, op.sill + op.h, H);
+      cur = op.c + op.w / 2;
+    }
+    piece(cur, a1, 0, H);
+  };
+  const win = { c: D / 2, w: 1.0, sill: 1.0, h: 1.0 };
+  const doors = dc.map(c => ({ c, w: 0.9, sill: 0, h: 2.05 }));
+  wall('x', 0, T, 0, W, doors, 'lo');                    // довга стіна до смуги проїзду з двома дверима
+  wall('x', D - T, D, 0, W, [], 'hi');                   // довга стіна з протилежного боку
+  wall('z', 0, T, T, D - T, [win], 'lo');                // торцева (ПД) з вікном
+  wall('z', W - T, W, T, D - T, [win], 'hi');            // торцева (ПН) з вікном
+  wall('z', PX - 0.06, PX + 0.06, T, D - T, [], null);   // перегородка
+
+  // вікна в торцях: скло й білі лиштви
+  for (const [x0, x1, xo] of [[0, T, -0.03], [W - T, W, W]]) {
+    const xm = (x0 + x1) / 2;
+    bx(xm - 0.01, xm + 0.01, F + 1.0, F + 2.0, win.c - 0.5, win.c + 0.5, mat.glass);
+    const xA = xo, xB = xo + 0.03;
+    bx(xA, xB, F + 2.0, F + 2.08, win.c - 0.58, win.c + 0.58, mat.white);
+    bx(xA, xB, F + 0.94, F + 1.0, win.c - 0.62, win.c + 0.62, mat.white);
+    for (const s of [-1, 1]) bx(xA, xB, F + 1.0, F + 2.0, win.c + s * 0.5 - (s > 0 ? 0 : 0.08), win.c + s * 0.5 + (s > 0 ? 0.08 : 0), mat.white);
+    bx(xm - 0.02, xm + 0.02, F + 1.0, F + 2.0, win.c - 0.01, win.c + 0.01, mat.white);   // середній імпост
+  }
+  // двері: білі, відчинені назовні, лиштви навколо
+  for (const c of dc) {
+    bx(c - 0.53, c + 0.53, F + 2.05, F + 2.13, -0.03, 0, mat.white);
+    for (const s of [-1, 1]) bx(c + s * 0.45 - (s > 0 ? 0 : 0.08), c + s * 0.45 + (s > 0 ? 0.08 : 0), F, F + 2.05, -0.03, 0, mat.white);
+    const pivot = new THREE.Group();
+    pivot.position.set(c + 0.44, F, -0.02);
+    pivot.rotation.y = -1.4;
+    kb.add(pivot);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.88, 2.0, 0.04), doorMats.white); leaf.position.set(-0.44, 1.0, 0); leaf.castShadow = true; pivot.add(leaf);
+    for (const yy of [0.5, 1.5]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.052), doorMats.panel); p.position.set(-0.44, yy, 0); pivot.add(p); }
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.1), doorMats.chrome); h.position.set(-0.8, 1.0, 0); pivot.add(h);
+  }
+
+  // дах: двосхилий, гребінь уздовж довгої осі (z у світі), у стилі хати; стеля теж у групі, щоб ховалась разом з дахом
+  kRoof = new THREE.Group();
+  kRoof.position.set(0, F + H, 0);
+  kb.add(kRoof);
+  const halfD = D / 2 + o, slope = Math.hypot(halfD, rise), ang = Math.atan2(rise, halfD), len = W + 2 * o;
+  for (const s of [-1, 1]) {
+    box(len, 0.12, slope, mat.roof, W / 2, rise / 2, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
+    box(len, 0.2, 0.05, mat.white, W / 2, -0.06, D / 2 + s * (halfD + 0.02), kRoof);
+    box(len, 0.09, 0.11, mat.white, W / 2, -0.2, D / 2 + s * (halfD + 0.08), kRoof);
+    for (const x of [-o, W + o]) box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
+  }
+  const gshape = new THREE.Shape([new THREE.Vector2(-D / 2, 0), new THREE.Vector2(D / 2, 0), new THREE.Vector2(0, rise)]);
+  for (const x of [0.02, W - 0.02]) {
+    const g2 = new THREE.Mesh(new THREE.ShapeGeometry(gshape), mat.wallOut);
+    g2.rotation.y = x < 1 ? -Math.PI / 2 : Math.PI / 2;
+    g2.position.set(x, 0, D / 2);
+    kRoof.add(g2);
+  }
+  box(W - 2 * T, 0.04, D - 2 * T, mat.white, W / 2, -0.02, D / 2, kRoof);          // біла стеля
+
+  // лампочки: по одній у кожній кімнаті
+  for (const xc of [1.97, 5.43]) {
+    const l = new THREE.PointLight(0xfff1dc, 6, 7, 1.6); l.position.set(xc, F + 2.2, D / 2); kb.add(l);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: 0xfff6dd, emissive: 0xfff1dc, emissiveIntensity: 1.2 })); bulb.position.copy(l.position); kb.add(bulb);
+    cyl(0.005, 0.28, dark, xc, 2.22, D / 2);   // шнур
+  }
+
+  // вміст кімнат віддзеркалений уздовж довгої осі (x → W - x): інструменти в північній кімнаті, одяг і шафи в південній
+  const fbO = fb, colO = col, cylO = cyl;
+  {
+  const fb = (x0, x1, ...rest) => fbO(W - x1, W - x0, ...rest);
+  const col = (x0, x1, z0, z1) => colO(W - x1, W - x0, z0, z1);
+  const cyl = (r, h, m, x, y, z, rt) => cylO(r, h, m, W - x, y, z, rt);
+  // ---------- кімната з інструментами (x 0.3..3.64 до віддзеркалення, z 0.3..3.7) ----------
+  // верстак під вікном уздовж торцевої стіни
+  fb(0.3, 0.95, 0.88, 0.94, 1.3, 3.5, wood, true);
+  for (const x of [0.3, 0.89]) for (const z of [1.3, 3.44]) fb(x, x + 0.06, 0, 0.88, z, z + 0.06, wood);
+  fb(0.36, 0.89, 0.2, 0.24, 1.36, 3.44, wood);
+  fb(0.4, 0.6, 0.94, 1.08, 3.0, 3.2, metal); fb(0.6, 0.68, 1.06, 1.1, 3.0, 3.2, dark);          // лещата
+  fb(0.45, 0.9, 0.94, 1.08, 1.5, 2.0, red); fb(0.6, 0.75, 1.08, 1.1, 1.65, 1.85, dark);         // червоний ящик для інструментів
+  fb(0.55, 0.6, 0.94, 0.97, 2.2, 2.7, darkWood); fb(0.5, 0.65, 0.94, 1.0, 2.65, 2.75, dark);     // молоток
+  for (const [z, c] of [[2.85, 0xd9a21b], [2.95, 0x4a7fb0]]) cyl(0.05, 0.1, M(c), 0.75, 0.94, z);  // банки з саморізами
+  // під верстаком: каністри, відро
+  fb(0.4, 0.75, 0.24, 0.62, 1.45, 1.8, red); fb(0.4, 0.75, 0.24, 0.62, 1.9, 2.25, M(0x2f6a3a));
+  cyl(0.14, 0.3, M(0x9aa0a3, 0.4, { metalness: 0.5 }), 0.6, 0.24, 2.9, 0.17);
+  cyl(0.16, 0.34, M(0x3b6ea5), 0.8, 0, 0.75, 0.2);                           // відро біля дверей
+  fb(3.2, 3.5, 0, 0.42, 3.2, 3.5, red, true);                                  // каністра
+  // перфоборд на перегородці: інструменти
+  fb(3.56, 3.64, 1.05, 1.95, 1.2, 3.5, pegboard);
+  const hang = (z, y0, y1, w, m) => fb(3.5, 3.56, y0, y1, z - w / 2, z + w / 2, m);
+  hang(1.5, 1.35, 1.75, 0.03, darkWood); hang(1.5, 1.7, 1.82, 0.1, dark);      // молоток
+  hang(1.85, 1.15, 1.55, 0.18, metal); hang(1.85, 1.55, 1.7, 0.04, darkWood);  // ножівка
+  hang(2.2, 1.4, 1.75, 0.05, red); hang(2.3, 1.4, 1.75, 0.05, red);            // обценьки
+  hang(2.6, 1.3, 1.85, 0.025, metal); hang(2.6, 1.8, 1.9, 0.07, metal);        // гайковий ключ
+  for (const z of [2.95, 3.02, 3.09]) hang(z, 1.45, 1.8, 0.02, z === 3.02 ? M(0xd9a21b) : M(0x4a7fb0));   // викрутки
+  col(3.5, 3.64, 1.2, 3.5);
+  // довгий інструмент уздовж стіни з дверима: лопати, граблі, мотики
+  for (const [i, x] of [2.45, 2.7, 2.95, 3.2, 3.4].entries()) {
+    const pole = cyl(0.016, 1.55, darkWood, x, 0.05, 0.4); pole.rotation.x = 0.08;
+    if (i % 2 === 0) fb(x - 0.1, x + 0.1, 0.0, 0.3, 0.33, 0.36, metal);           // лопата
+    else if (i === 1) { fb(x - 0.18, x + 0.18, 0.0, 0.04, 0.31, 0.37, metal); for (let k = 0; k < 6; k++) fb(x - 0.17 + k * 0.068, x - 0.15 + k * 0.068, 0, 0.1, 0.33, 0.36, metal); }   // граблі
+    else fb(x - 0.1, x + 0.1, 0.0, 0.1, 0.32, 0.36, metal);                       // мотика
+  }
+  col(2.3, 3.5, 0.3, 0.55);
+  // стелаж біля довгої стіни: банки, фарба, коробки
+  for (const x of [1.3, 3.1]) for (const z of [3.3, 3.66]) fb(x, x + 0.04, 0, 2.0, z, z + 0.04, metal);
+  for (const y of [0.1, 0.6, 1.05, 1.5, 1.95]) fb(1.3, 3.14, y, y + 0.04, 3.28, 3.68, wood);
+  col(1.3, 3.14, 3.28, 3.68);
+  for (let i = 0; i < 6; i++) cyl(0.07, 0.17, M([0xc9c4b8, 0xb8352b, 0x2e6a9e, 0xe6d9a8][i % 4], 0.5), 1.5 + i * 0.28, 0.14, 3.5);      // банки фарби
+  for (let i = 0; i < 5; i++) cyl(0.045, 0.14, M(0xcfe0d6, 0.2, { transparent: true, opacity: 0.8 }), 1.5 + i * 0.3, 0.64, 3.5);          // скляні банки
+  fb(1.4, 2.0, 1.09, 1.4, 3.35, 3.6, carton); fb(2.2, 2.8, 1.09, 1.3, 3.35, 3.6, carton);
+  fb(1.4, 1.8, 1.54, 1.8, 3.35, 3.6, M(0x3b6ea5)); fb(2.0, 3.0, 1.54, 1.6, 3.35, 3.6, darkWood);
+
+  // ---------- кімната з одягом і шафами (x 3.76..7.1 до віддзеркалення, z 0.3..3.7) ----------
+  // три шафи вздовж південної довгої стіни: дві темні, одна біла
+  for (const [x0, x1, m] of [[4.0, 4.9, darkWood], [4.95, 5.85, darkWood], [5.9, 6.8, M(0xf2f0e8, 0.5)]]) {
+    fb(x0, x1, 0, 2.0, 3.15, 3.7, m, true);
+    fb((x0 + x1) / 2 - 0.005, (x0 + x1) / 2 + 0.005, 0.05, 1.95, 3.12, 3.15, dark);          // шов між дверцятами
+    for (const s of [-1, 1]) fb((x0 + x1) / 2 + s * 0.05 - 0.01, (x0 + x1) / 2 + s * 0.05 + 0.01, 0.9, 1.15, 3.1, 3.15, doorMats.chrome);
+  }
+  // картонні коробки: стопки зі скотчем
+  const cart = (x, z, w, d, h, y, r) => {
+    const b = box(w, h, d, carton, W - x, F + y + h / 2, z, kb); b.rotation.y = r;
+    const t = box(w * 0.18, 0.004, d + 0.004, tape, W - x, F + y + h + 0.001, z, kb); t.rotation.y = r;
+  };
+  for (const [x, z, w, d, h, y, r] of [
+    [4.15, 0.65, 0.6, 0.5, 0.4, 0, 0.05], [4.15, 0.65, 0.55, 0.45, 0.35, 0.4, -0.1], [4.15, 0.65, 0.5, 0.4, 0.3, 0.75, 0.08],
+    [4.15, 1.5, 0.55, 0.45, 0.5, 0, 0], [4.15, 1.5, 0.5, 0.4, 0.4, 0.5, 0.12],
+    [4.2, 2.4, 0.6, 0.5, 0.4, 0, 0.1], [4.2, 2.4, 0.5, 0.45, 0.4, 0.4, -0.08],
+    [6.7, 0.65, 0.7, 0.5, 0.5, 0, 0], [6.7, 0.65, 0.6, 0.45, 0.4, 0.5, -0.06],
+    [5.0, 2.6, 0.7, 0.5, 0.45, 0, 0.03], [5.0, 2.6, 0.55, 0.45, 0.4, 0.45, 0.1], [5.9, 2.6, 0.6, 0.5, 0.45, 0, 0],
+  ]) cart(x, z, w, d, h, y, r);
+  col(3.85, 4.5, 0.35, 2.7); col(6.35, 7.05, 0.35, 0.95); col(4.6, 6.2, 2.3, 2.9);
+  // пластикові контейнери з кришками
+  for (const [x, z, h] of [[6.0, 1.2, 0.3], [6.0, 1.75, 0.3]]) { fb(x - 0.17, x + 0.17, 0, h, z - 0.22, z + 0.22, M(0x5b86b0, 0.4)); fb(x - 0.19, x + 0.19, h, h + 0.04, z - 0.24, z + 0.24, M(0x35587f, 0.4)); }
+  // рейка з одягом біля вікна в торці
+  cyl(0.015, 1.55, metal, 6.6, 0, 1.0); cyl(0.015, 1.55, metal, 6.6, 0, 2.9);
+  for (const z of [1.0, 2.9]) fb(6.4, 6.8, 0, 0.03, z - 0.04, z + 0.04, metal);
+  cyl(0.012, 1.9, metal, 6.6, 0.6, 1.95).rotation.x = Math.PI / 2;
+  const clothes = [0x65777a, 0x9fc4df, 0xb8352b, 0xe6d9a8, 0x3b3f44, 0x6a8f5a, 0xd9cbb8, 0x8a7f75, 0x3b6ea5, 0xc9a227, 0x9c5a45];
+  clothes.forEach((c, i) => fb(6.4, 6.8, 0.62 + (i % 3) * 0.05, 1.52, 1.1 + i * 0.16, 1.1 + i * 0.16 + 0.1, M(c, 0.95)));
+  col(6.35, 6.85, 0.95, 2.95);
+  // валіза
+  fb(4.6, 5.0, 0, 0.2, 1.9, 2.3, M(0x7a4a2a, 0.7)); fb(4.7, 4.9, 0.2, 0.23, 2.0, 2.2, dark);
+  }
+})();
+
+// доріжка від воріт до ґанку (цегляна)
+(function buildPath() {
+  // цементні доріжки: пряма 70 см від хвіртки вздовж східної стіни хати до тераси + дві колії 60 см від брами під колеса авто
+  const concrete = new THREE.MeshStandardMaterial({ color: 0xb9b7b0, roughness: 1 });
+  const w = 0.7, y = 0.02, gz = plot.d / 2;
+  const wallX = house.position[0] + 0.25 + w / 2;                        // 0.25 — виступ цоколя від осі стіни; доріжка впритул до нього
+  const entryZ = house.position[1] - 10.2;                               // вхід на терасу на рівні крісел
+  const deckX = house.position[0] - 2.9;                                 // східний край тераси (світова x)
+  box(w, 0.04, gz - entryZ + w / 2, concrete, plot.wicket.x, y, (gz + entryZ - w / 2) / 2);            // від хвіртки вздовж стіни
+  box(wallX - deckX - 0.4, 0.04, w, concrete, (wallX + deckX + 0.4) / 2, y, entryZ);                   // до тераси
+  box(0.4, 0.15, 0.9, mat.foundation, deckX + 0.2, 0.075, entryZ, scene);                              // сходинка на терасу
+  // суцільний цементний під'їзд від воріт і хвіртки до асфальту
+  const ax0 = plot.wicket.x - plot.wicket.width / 2, ax1 = plot.gate.x + plot.gate.width / 2, az1 = STREET.z0;
+  box(ax1 - ax0, 0.04, az1 - gz, concrete, (ax0 + ax1) / 2, y, (gz + az1) / 2);
+  const tz1 = 20;                                                                                      // колії вздовж смуги проїзду
+  for (const s of [-1, 1]) box(0.6, 0.04, gz - tz1, concrete, plot.gate.x + s * 0.8, y, (gz + tz1) / 2);
+})();
+
+
+
+
+
 function addCollider(minX, maxX, minZ, maxZ) {
-  colliders.push({
-    minX: minX + house.position[0], maxX: maxX + house.position[0],
-    minZ: minZ + house.position[1], maxZ: maxZ + house.position[1],
-  });
+  colliders.push(worldBox(minX, maxX, minZ, maxZ));
 }
+
+const toggleRoof = () => { roof.visible = !roof.visible; kRoof.visible = roof.visible; };
 
 // ---------- керування ----------
 const walk = new PointerLockControls(camera, renderer.domElement);
@@ -1100,7 +1498,7 @@ orbit.enabled = false;
 let mode = 'walk';
 
 const EYE = 1.7, RADIUS = 0.3;
-camera.position.set(0, EYE, plot.d / 2 - 2);
+camera.position.set(plot.gate.x, EYE, plot.d / 2 - 2);
 camera.lookAt(0, EYE, 0);
 
 const isTouch = matchMedia('(pointer: coarse)').matches;
@@ -1115,7 +1513,7 @@ if (isTouch) startEl.style.display = 'none';
 const keys = {};
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'KeyR') roof.visible = !roof.visible;
+  if (e.code === 'KeyR') toggleRoof();
   if (e.code === 'KeyV') toggleMode();
   if (e.code === 'KeyO') toggleAllDoors();
 });
@@ -1126,14 +1524,14 @@ function toggleMode() {
     mode = 'orbit';
     walk.unlock();
     startEl.style.display = 'none';
-    camera.position.set(0, 35, 40);
-    orbit.target.set(house.position[0] + house.w / 2, 0, house.position[1] + house.d / 2);
+    camera.position.set(0, 55, plot.d / 2 + 25);
+    orbit.target.set(house.position[0] - house.w / 2, 0, house.position[1] - house.d / 2);
     orbit.enabled = true;
     orbit.update();
   } else {
     mode = 'walk';
     orbit.enabled = false;
-    camera.position.set(house.position[0] + house.w / 2, EYE, plot.d / 2 - 2);
+    camera.position.set(house.position[0] - house.w / 2, EYE, plot.d / 2 - 2);
     camera.lookAt(0, EYE, 0);
     showStart();
   }
@@ -1162,7 +1560,7 @@ if (isTouch) {
     b.addEventListener('click', fn);
     document.body.appendChild(b);
   };
-  btn('Дах', 12, () => roof.visible = !roof.visible);
+  btn('Дах', 12, () => toggleRoof());
   btn('Вид', 60, toggleMode);
   btn('Двері', 108, toggleAllDoors);
 
@@ -1229,7 +1627,7 @@ function update(dt) {
   const nz = p.z + dz;
   if (!collides(p.x, nz)) p.z = nz;
   // не виходимо за межі ділянки (крім воріт)
-  const inGate = Math.abs(p.x - plot.gate.x) < plot.gate.width / 2 - 0.3;
+  const inGate = Math.abs(p.x - plot.wicket.x) < plot.wicket.width / 2 - 0.25;
   p.x = lim(p.x, plot.w);
   p.z = inGate ? Math.min(p.z, plot.d / 2 + 30) : lim(p.z, plot.d);
   p.y = EYE;
