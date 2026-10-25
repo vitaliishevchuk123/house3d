@@ -420,9 +420,11 @@ for (const f of floors) {
 
 // пороги під дверима: прибирають видиму смугу чорнової підлоги між кімнатами; текстури вирівняні у світових координатах з підлогою кімнат
 for (const d of doors) {
-  const t = d.thr, w = t.x1 - t.x0, h = t.z1 - t.z0;
+  const t = d.thr;
+  if (t.kind === 'stone' && t.x1 > 11.3 && t.x1 < 11.5) t.x1 = 12.1;   // двері котельні: поріг іде до краю бетонної сходинки без шва
+  const w = t.x1 - t.x0, h = t.z1 - t.z0;
   let m;
-  if (t.kind === 'stone') m = new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1 });
+  if (t.kind === 'stone') m = new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   else {
     const sc = 2.4, tex = (t.kind === 'tile' ? oakTile : oak).clone();
     tex.needsUpdate = true;
@@ -438,9 +440,9 @@ for (const d of doors) {
 }
 // котельня: бетонна підлога (раніше була видима чорнова підлога)
 {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(10.8 - 9.075, 5.8 - 4.575), new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1 }));
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(11.05 - 9.075, 5.8 - 4.575), new THREE.MeshStandardMaterial({ color: 0x8a8d8c, roughness: 1 }));
   m.rotation.x = -Math.PI / 2;
-  m.position.set((9.075 + 10.8) / 2, FLOOR_Y + 0.003, (4.575 + 5.8) / 2);
+  m.position.set((9.075 + 11.05) / 2, FLOOR_Y + 0.003, (4.575 + 5.8) / 2);
   m.receiveShadow = true;
   houseGroup.add(m);
 }
@@ -476,10 +478,26 @@ houseGroup.add(roof);
   const shape = new THREE.Shape([new THREE.Vector2(-house.d / 2, 0), new THREE.Vector2(house.d / 2, 0), new THREE.Vector2(0, rise)]);
   for (const x of [0, house.w]) {
     const g = new THREE.Mesh(new THREE.ShapeGeometry(shape), mat.wallOut);
-    g.rotation.y = Math.PI / 2;
+    g.rotation.y = x === 0 ? -Math.PI / 2 : Math.PI / 2;               // нормаль назовні з обох боків (західний фронтон раніше був зрізаний)
     g.position.set(x, 0, house.d / 2);
     g.castShadow = true;
     roof.add(g);
+  }
+  // маленькі пластикові двері зі склом у західному фронтоні: лаз на горище
+  {
+    const dw = 0.7, dh = 1.3, gx = -0.03, gz = house.d / 2;
+    const part = (w, h, d, m, y, z = 0) => box(d, h, w, m, gx - d / 2, y, gz + z, roof);   // d — по x (від стіни), w — уздовж z
+    part(dw + 0.14, dh + 0.07, 0.03, doorMats.white, dh / 2 + 0.035);                    // білий лиштв навколо
+    // полотно з маленьким віконцем угорі: нижня глуха частина, верхня смуга, дві стійки, скло в отворі
+    const wy0 = 0.85, wy1 = 1.15, ww = 0.36, sw = (dw - ww) / 2;
+    part(dw, wy0 - 0.01, 0.05, doorMats.pvc, (wy0 + 0.01) / 2);
+    part(dw, dh - wy1 + 0.01, 0.05, doorMats.pvc, (wy1 + dh + 0.01) / 2);
+    for (const sg of [-1, 1]) part(sw, wy1 - wy0, 0.05, doorMats.pvc, (wy0 + wy1) / 2, sg * (ww / 2 + sw / 2));
+    part(ww, wy1 - wy0, 0.01, new THREE.MeshStandardMaterial({ color: 0x8fb4c8, transparent: true, opacity: 0.55, roughness: 0.05 }), (wy0 + wy1) / 2);   // склопакет
+    part(dw * 0.7, 0.4, 0.012, doorMats.pvcPanel, 0.4, 0).position.x -= 0.05;               // тиснена панель знизу
+    // виступаючий поріг-полиця під дверима: щоб ставити драбину на неї, а не на фасад
+    box(0.3, 0.05, 1.1, mat.white, gx - 0.15 + 0.03, 0.0, gz, roof);
+    part(0.03, 0.1, 0.06, doorMats.chrome, 0.65, dw / 2 - 0.08);                           // ручка
   }
 })();
 
@@ -487,7 +505,10 @@ houseGroup.add(roof);
 (function buildFoundation() {
   const o = 0.2 + 0.05, h = 0.6, w = house.w, d = house.d;
   box(w + 2 * o, h, 0.1, mat.foundation, w / 2, h / 2 - 0.1, -o, houseGroup);
-  box(w + 2 * o, h, 0.1, mat.foundation, w / 2, h / 2 - 0.1, d + o, houseGroup);
+  // південний цоколь з проломом перед вхідними дверима (x 7.8..8.7), щоб відчинені двері не впиралися в нього
+  const fx0 = 8.25 - 0.45, fx1 = 8.25 + 0.45;
+  box(fx0 + o, h, 0.1, mat.foundation, (-o + fx0) / 2, h / 2 - 0.1, d + o, houseGroup);
+  box(w + o - fx1, h, 0.1, mat.foundation, (fx1 + w + o) / 2, h / 2 - 0.1, d + o, houseGroup);
   box(0.1, h, d + 2 * o, mat.foundation, -o, h / 2 - 0.1, d / 2, houseGroup);
   // східний цоколь з проломом перед дверима котельні (двері z 4.74..5.64), щоб двері не впиралися в фундамент
   const dz0 = 5.19 - 0.45, dz1 = 5.19 + 0.45;
@@ -1993,6 +2014,55 @@ renderer.setAnimationLoop(() => {
   cap.rotation.z = Math.PI / 2;
   cap.position.set(11.27 - bx, 2.15, 0.15);
   boiler.add(cap);
+})();
+
+// газопостачання: від вулиці газ іде під землею, біля котельні труба виходить на поверхню (кран, лічильник),
+// далі через стіну в котельню до котла й відгалуження крізь перегородку до плити
+(function buildGasSupply() {
+  const g = houseGroup, base = FLOOR_Y;
+  const yellow = new THREE.MeshStandardMaterial({ color: 0xe8b820, roughness: 0.45 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xc03a2b, roughness: 0.5 });
+  const meterMat = new THREE.MeshStandardMaterial({ color: 0xb9bcbe, metalness: 0.4, roughness: 0.4 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x303535, roughness: 0.5 });
+  const R = 0.017;
+  const pipe = (a, b, r = R) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), v = B.clone().sub(A);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, v.length(), 10), yellow);
+    m.position.copy(A).add(B).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
+    m.castShadow = true;
+    g.add(m);
+  };
+  const elbow = (x, y, z) => { const s = new THREE.Mesh(new THREE.SphereGeometry(R * 1.2, 10, 8), yellow); s.position.set(x, y, z); g.add(s); };
+  const valve = (x, y, z) => {                                       // кульовий кран: жовтий корпус, червона ручка
+    const b = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.05), yellow); b.position.set(x, y, z); g.add(b);
+    const h = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.015, 0.02), red); h.position.set(x, y + 0.04, z); g.add(h);
+  };
+
+  const wz = 4.6, wx = 11.34;              // вихід труби з землі біля стіни, північніше дверей котельні
+  const iy = base + 0.75;                  // висота труби в котельні
+  // від вулиці газ іде під землею; біля хати труба виходить на поверхню: кран, лічильник, у стіну
+  box(0.3, 0.1, 0.3, mat.foundation, wx, 0.05, wz, g);               // бетонна плитка навколо виходу
+  pipe([wx, 0, wz], [wx, 0.55, wz]);
+  valve(wx, 0.3, wz);                                                // відключний кран
+  box(0.14, 0.3, 0.22, meterMat, wx, 0.7, wz, g);                    // лічильник газу
+  const dial = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.05), dark); dial.position.set(wx + 0.071, 0.75, wz); dial.rotation.y = Math.PI / 2; g.add(dial);
+  pipe([wx, 0.85, wz], [wx, iy, wz]);
+  elbow(wx, iy, wz);
+  // крізь зовнішню стіну в котельню, по північній стіні до стояка котла й далі до перегородки
+  const px = 9.15;
+  pipe([wx, iy, wz], [px, iy, wz]);
+  pipe([9.76, iy, wz], [9.76, iy, 4.725]);                           // до стояка котла
+  elbow(9.76, iy, wz);
+  // відгалуження до плити: уздовж перегородки до z=5.66, вниз, крізь стіну в шафу під плитою
+  const hz = 5.66;
+  elbow(px, iy, wz);
+  pipe([px, iy, wz], [px, iy, hz]);
+  elbow(px, iy, hz);
+  pipe([px, iy, hz], [px, base + 0.4, hz]);
+  valve(px, base + 0.65, hz);
+  elbow(px, base + 0.4, hz);
+  pipe([px, base + 0.4, hz], [8.6, base + 0.4, hz]);
 })();
 
 // бойлер непрямого нагріву (накопичувальний водонагрівач 100 л) у котельні поруч з газовим котлом: стоїть на підлозі біля стіни
