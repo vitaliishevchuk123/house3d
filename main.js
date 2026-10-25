@@ -282,10 +282,10 @@ function box(w, h, d, material, x, y, z, parent = scene) {
   scene.add(crown);
 });
 
-// майданчик 5 x 4 м (20 м²): бетонна стяжка з білою розміткою по периметру і баскетбольний щит із кільцем; усе зібрано в локальних координатах
+// майданчик 7 x 7 м (49 м²): бетонна стяжка з білою розміткою по периметру і баскетбольний щит із кільцем; усе зібрано в локальних координатах
 // навколо центру (cx, cz) і повернуто на 90°, тож кільце стоїть на західному краю, до сітки паркану (щит дивиться на схід, на майданчик)
 (function buildCourt() {
-  const CX = -11.4, CZ = 8, W = 5, D = 4, y = 0.02;
+  const CX = -9.9, CZ = 7.5, W = 7, D = 7, y = 0.02;
   const g = new THREE.Group();
   g.position.set(CX, 0, CZ);
   g.rotation.y = Math.PI / 2;
@@ -318,6 +318,52 @@ function box(w, h, d, material, x, y, z, parent = scene) {
   net.position.set(0, 2.85, pz + 0.52 + 0.015 + 0.25);
   g.add(net);
   colliders.push({ minX: CX + pz - 0.1, maxX: CX + pz + 0.1, minZ: CZ - 0.1, maxZ: CZ + 0.1 });   // поворот на 90°: локальний -z → світовий -x
+})();
+
+// фігура гравця 187 см у кидку з-під щита: щоб прикинути, чи достатньо місця на майданчику (клавіша P — сховати/показати)
+let toggleTestPlayer = () => {};
+(function buildTestPlayer() {
+  const g = new THREE.Group();
+  g.position.set(-8.4, 0.04, 7.5);                                                 // ~4.6 м від кільця (штрафна дистанція) по осі майданчика
+  g.rotation.y = -Math.PI / 2;                                                      // обличчям на захід, до кільця
+  scene.add(g);
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe0b08a, roughness: 0.8 });
+  const shirt = new THREE.MeshStandardMaterial({ color: 0x2f5fa8, roughness: 0.85 });
+  const shorts = new THREE.MeshStandardMaterial({ color: 0x1f2326, roughness: 0.85 });
+  const shoe = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.7 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x2b2018, roughness: 0.9 });
+  const ballM = new THREE.MeshStandardMaterial({ color: 0xd8641c, roughness: 0.8 });
+  const lineM = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+  const Y = new THREE.Vector3(0, 1, 0);
+  const limb = (a, b, r, m) => {                                                    // циліндр між двома точками
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), d = B.clone().sub(A);
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, d.length(), 10), m);
+    o.position.copy(A.clone().add(B).multiplyScalar(0.5));
+    o.quaternion.setFromUnitVectors(Y, d.normalize());
+    o.castShadow = true;
+    g.add(o);
+    return o;
+  };
+  const ball3 = (r, m, x, y, z) => { const o = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+  for (const s of [-1, 1]) {
+    limb([s * 0.09, 0.92, 0], [s * 0.1, 0.5, 0.04], 0.07, shorts);                  // стегно
+    limb([s * 0.1, 0.5, 0.04], [s * 0.09, 0.09, 0], 0.05, skin);                    // гомілка
+    const f = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.07, 0.27), shoe); f.position.set(s * 0.09, 0.04, 0.05); f.castShadow = true; g.add(f);
+  }
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.6, 0.22), shirt); torso.position.set(0, 1.22, 0); torso.castShadow = true; g.add(torso);
+  const hips = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.18, 0.21), shorts); hips.position.set(0, 0.95, 0); g.add(hips);
+  limb([0, 1.52, 0], [0, 1.62, 0.01], 0.05, skin);                                  // шия
+  ball3(0.105, skin, 0, 1.73, 0.02).scale.set(1, 1.18, 1.05);                         // голова: верх ≈ 1.87 м
+  ball3(0.108, hair, 0, 1.775, -0.01).scale.set(1, 0.7, 1.05);
+  // руки у кидку: праву (кидкову) підняті вгору й уперед, ліва підтримує м'яч знизу збоку
+  limb([0.2, 1.48, 0], [0.24, 1.72, 0.18], 0.045, shirt); limb([0.24, 1.72, 0.18], [0.1, 2.0, 0.3], 0.04, skin);
+  limb([-0.2, 1.48, 0], [-0.28, 1.68, 0.1], 0.045, shirt); limb([-0.28, 1.68, 0.1], [-0.08, 1.96, 0.3], 0.04, skin);
+  const bx0 = 0.01, by0 = 2.13, bz0 = 0.32;
+  ball3(0.12, ballM, bx0, by0, bz0);                                                  // м'яч (діаметр ~24 см)
+  for (const rot of [[0, 0, 0], [Math.PI / 2, 0, 0]]) {
+    const t = new THREE.Mesh(new THREE.TorusGeometry(0.121, 0.003, 6, 24), lineM); t.position.set(bx0, by0, bz0); t.rotation.set(...rot); g.add(t);
+  }
+  toggleTestPlayer = () => { g.visible = !g.visible; };
 })();
 
 // ---------- хата ----------
@@ -2050,6 +2096,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyV') toggleMode();
   if (e.code === 'KeyO') toggleAllDoors();
   if (e.code === 'KeyG') toggleGrillLid();
+  if (e.code === 'KeyP') toggleTestPlayer();
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
@@ -3145,6 +3192,9 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
 
 
 
