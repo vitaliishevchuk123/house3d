@@ -270,11 +270,15 @@ function box(w, h, d, material, x, y, z, parent = scene) {
   const stopH = 4.7;
   for (const z of [5, 7.5, 10]) pipe(0.035, stopH - (fh + 0.1), -hw, (stopH + fh + 0.1) / 2, z);
   wireMesh(5, stopH - fh, -hw, (stopH + fh) / 2, 7.5, true);
+  // те саме за футбольними воротами (поле z -9.5..2.5): висока сітка на обох кінцях; на заході вона стикується з сіткою баскетбольного майданчика
+  for (const z of [-10, -7.5, -5, -2.5, 0, 2.5]) { pipe(0.035, stopH - (fh + 0.1), -hw, (stopH + fh + 0.1) / 2, z); pipe(0.035, stopH - (fh + 0.1), hw, (stopH + fh + 0.1) / 2, z); }
+  wireMesh(15, stopH - fh, -hw, (stopH + fh) / 2, -2.5, true);          // захід: z -10..5
+  wireMesh(12.5, stopH - fh, hw, (stopH + fh) / 2, -3.75, true);        // схід: z -10..2.5
   run(hw, -hd, hw, hd);
 })();
 
 // дерева
-[[-12, -32], [11, -28], [-11, -12], [12, -3], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
+[[-12, -32], [11, -28], [-11, -12], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
   box(0.35, 3, 0.35, mat.trunk, x, 1.5, z);
   const crown = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), mat.leaf);
   crown.position.set(x, 4.6, z);
@@ -364,6 +368,62 @@ let toggleTestPlayer = () => {};
     const t = new THREE.Mesh(new THREE.TorusGeometry(0.121, 0.003, 6, 24), lineM); t.position.set(bx0, by0, bz0); t.rotation.set(...rot); g.add(t);
   }
   toggleTestPlayer = () => { g.visible = !g.visible; };
+})();
+
+// футбольне поле 25.2 x 12 м на газоні на всю ширину подвір'я за баскетбольним майданчиком (довга вісь уздовж x), по краях двоє воріт 4 x 2 м із сіткою (задня стінка сітки за метр від паркану й доріжки — щоб косити траву)
+(function buildFootball() {
+  const X0 = -12.2, X1 = 13.0, Z0 = -9.5, Z1 = 2.5, cz = (Z0 + Z1) / 2, cxm = (X0 + X1) / 2;
+  const white = new THREE.MeshStandardMaterial({ color: 0xf4f4ee, roughness: 0.9 });
+  const lw = 0.1, ly = 0.012;
+  const ln = (x0, x1, z0, z1) => box(Math.abs(x1 - x0) + (x0 === x1 ? lw : 0), 0.01, Math.abs(z1 - z0) + (z0 === z1 ? lw : 0), white, (x0 + x1) / 2, ly, (z0 + z1) / 2);
+  ln(X0, X1, Z0, Z0); ln(X0, X1, Z1, Z1); ln(X0, X0, Z0, Z1); ln(X1, X1, Z0, Z1);        // периметр
+  ln(cxm, cxm, Z0, Z1);                                                                  // центральна лінія
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.45, 2.55, 48), white);            // центральне коло
+  ring.rotation.x = -Math.PI / 2; ring.position.set(cxm, ly + 0.002, cz); scene.add(ring);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.15, 16), white);
+  dot.rotation.x = -Math.PI / 2; dot.position.set(cxm, ly + 0.002, cz); scene.add(dot);
+  for (const s of [-1, 1]) {                                                             // штрафні майданчики 5 x 8 м і відмітки 6 м
+    const xe = s < 0 ? X0 : X1;
+    const xin = s < 0 ? X0 + 5 : X1 - 5;
+    ln(xin, xin, cz - 4, cz + 4); ln(xe, xin, cz - 4, cz - 4); ln(xe, xin, cz + 4, cz + 4);
+    const sp = new THREE.Mesh(new THREE.CircleGeometry(0.12, 12), white);
+    sp.rotation.x = -Math.PI / 2; sp.position.set(s < 0 ? X0 + 6 : X1 - 6, ly + 0.002, cz); scene.add(sp);
+  }
+  // ворота: стійки 4 м у світлі, поперечина на 2 м, сітка (задня, бокові, верхня) глибиною 0.9 м; ротація — щоб обидва дивились у поле
+  const post = new THREE.MeshStandardMaterial({ color: 0xf4f4ee, roughness: 0.5, metalness: 0.1 });
+  const netM = new THREE.LineBasicMaterial({ color: 0xe8e8e0, transparent: true, opacity: 0.8 });
+  const GW = 4, GH = 2, GD = 0.9;
+  function grid(pts, u, v, nu, nv) {                                                     // сітка на площині, заданій кутом і двома векторами
+    const p = [];
+    for (let i = 0; i <= nu; i++) { const a = pts.clone().addScaledVector(u, i / nu), b = a.clone().add(v); p.push(a.x, a.y, a.z, b.x, b.y, b.z); }
+    for (let j = 0; j <= nv; j++) { const a = pts.clone().addScaledVector(v, j / nv), b = a.clone().add(u); p.push(a.x, a.y, a.z, b.x, b.y, b.z); }
+    const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    return new THREE.LineSegments(gg, netM);
+  }
+  const goal = (xm, dir) => {                                                            // xm — лінія воріт, dir = +1 якщо поле у бік +x
+    const g = new THREE.Group();
+    g.position.set(xm, 0, cz);
+    g.rotation.y = dir > 0 ? 0 : Math.PI;
+    scene.add(g);
+    const cyl = (r, l, x, y, z, axis) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, l, 10), post);
+      m.position.set(x, y, z);
+      if (axis === 'z') m.rotation.x = Math.PI / 2; else if (axis === 'x') m.rotation.z = Math.PI / 2;
+      m.castShadow = true; g.add(m); return m;
+    };
+    for (const z of [-GW / 2, GW / 2]) cyl(0.06, GH, 0, GH / 2, z);                      // стійки
+    cyl(0.06, GW + 0.12, 0, GH, 0, 'z');                                                 // поперечина
+    for (const z of [-GW / 2, GW / 2]) { cyl(0.025, GD, -GD / 2, GH * 0.9, z, 'x'); cyl(0.025, GD, -GD / 2, 0.02, z, 'x'); }   // нижні та верхні розкоси назад
+    cyl(0.025, GW, -GD, 0.02, 0, 'z'); cyl(0.025, GW, -GD, GH * 0.5, 0, 'z');            // задня рама
+    g.add(grid(new THREE.Vector3(-GD, 0, -GW / 2), new THREE.Vector3(0, 0, GW), new THREE.Vector3(0, GH * 0.8, 0), 16, 8));          // задня стінка
+    g.add(grid(new THREE.Vector3(0, GH, -GW / 2), new THREE.Vector3(-GD, -GH * 0.2, 0), new THREE.Vector3(0, 0, GW), 4, 16));        // дах
+    for (const z of [-GW / 2, GW / 2]) g.add(grid(new THREE.Vector3(0, 0, z), new THREE.Vector3(-GD, 0, 0), new THREE.Vector3(0, GH, 0), 4, 8));   // бокові
+    // колізії: дві стійки й задня сторона
+    for (const z of [-GW / 2, GW / 2]) colliders.push({ minX: xm - 0.08, maxX: xm + 0.08, minZ: cz + z - 0.08, maxZ: cz + z + 0.08 });
+    colliders.push({ minX: Math.min(xm, xm - dir * GD) - 0.05, maxX: Math.max(xm, xm - dir * GD) + 0.05, minZ: cz - GW / 2, maxZ: cz + GW / 2 });
+  };
+  goal(X0, +1);
+  goal(X1, -1);
 })();
 
 // ---------- хата ----------
@@ -3192,6 +3252,8 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
 
 
 
