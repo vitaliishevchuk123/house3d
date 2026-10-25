@@ -633,6 +633,40 @@ function vagBox(w, d, x, y, z, parent, runsAlong, rotX = 0, h = 0.02) {
 const slopedSoffit = (w, d, cx, cy, cz, theta, parent) =>
   vagBox(w, d, cx, cy - 0.075 * Math.cos(theta), cz - 0.075 * Math.sin(theta), parent, 'z', theta);
 
+// ринва (півкругла) вздовж карниза і водостічні труби: від ринви вниз, коліном до стіни, далі вертикально до землі
+// parent — група даху; xa..xb — довжина ринви; zc — вісь ринви; wallZ — вісь труби біля стіни; xs — позиції труб; bottomY — низ труби
+function addGutter(parent, xa, xb, zc, wallZ, xs, bottomY) {
+  const gm = new THREE.MeshStandardMaterial({ color: 0xe6e4dc, roughness: 0.5, side: THREE.DoubleSide });
+  const R = 0.055, len = xb - xa, gy = -0.12;
+  const tr = new THREE.Mesh(new THREE.CylinderGeometry(R, R, len, 14, 1, true, Math.PI, Math.PI), gm);   // нижня половина — жолоб
+  tr.rotation.z = Math.PI / 2;
+  tr.position.set((xa + xb) / 2, gy, zc);
+  tr.castShadow = true;
+  parent.add(tr);
+  const tube = (a, b, r = 0.035) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), v = B.clone().sub(A);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, v.length(), 10), gm);
+    m.position.copy(A).add(B).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
+    m.castShadow = true;
+    parent.add(m);
+  };
+  const ball = (x, y, z) => { const b = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8), gm); b.position.set(x, y, z); parent.add(b); };
+  const yOut = gy - R - 0.12, yBend = gy - R - 0.12;
+  for (const x of xs) {
+    tube([x, gy - R, zc], [x, yOut, zc]);                           // виток із ринви
+    ball(x, yOut, zc);
+    tube([x, yOut, zc], [x, yBend, wallZ]);                         // коліно під звисом до стіни
+    ball(x, yBend, wallZ);
+    tube([x, yBend, wallZ], [x, bottomY, wallZ]);                   // вертикально до землі
+    for (const y of [-0.9, -1.8, bottomY + 0.3]) {                    // хомути до стіни
+      const c = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.05), gm);
+      c.position.set(x, y, wallZ);
+      parent.add(c);
+    }
+  }
+}
+
 // дах (двосхилий, гребінь уздовж x)
 const roof = new THREE.Group();
 roof.position.y = FLOOR_Y + house.wallHeight;
@@ -648,19 +682,13 @@ houseGroup.add(roof);
     m.rotation.x = s * ang;
     // білий карниз-фасцiя, ринва й білі планки по краях фронтонів
     box(len, 0.2, 0.05, mat.white, house.w / 2, -0.06, house.d / 2 + s * (halfD + 0.02), roof);
-    box(len, 0.09, 0.11, mat.white, house.w / 2, -0.2, house.d / 2 + s * (halfD + 0.08), roof);
+    addGutter(roof, -o, house.w + o, house.d / 2 + s * (halfD + 0.08), house.d / 2 + s * (house.d / 2 + 0.34), [0.25, house.w - 0.25], -(FLOOR_Y + house.wallHeight) + 0.05);
     for (const x of [-o, house.w + o]) {
       const rake = box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, house.d / 2 + s * halfD / 2, roof);
       rake.rotation.x = s * ang;
       slopedSoffit(o, slope, x > 0 ? house.w + o / 2 : -o / 2, rise / 2, house.d / 2 + s * halfD / 2, s * ang, roof);   // під звисом фронтону
     }
     vagBox(len, o - 0.2, house.w / 2, -0.1, house.d / 2 + s * (house.d / 2 + (0.2 + o) / 2), roof, 'x');   // під карнизом
-  }
-  // водостічні труби по кутах фасаду
-  for (const x of [-o + 0.15, house.w + o - 0.15]) {
-    const pipe = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, house.wallHeight + 0.2, 8), mat.white);
-    pipe.position.set(x, -(house.wallHeight + 0.2) / 2 + 0.0, house.d / 2 + halfD + 0.08);
-    roof.add(pipe);
   }
   // фронтони
   const shape = new THREE.Shape([new THREE.Vector2(-house.d / 2, 0), new THREE.Vector2(house.d / 2, 0), new THREE.Vector2(0, rise)]);
@@ -1401,7 +1429,7 @@ let kRoof;
   for (const s of [-1, 1]) {
     box(len, 0.12, slope, mat.roof, W / 2, rise / 2, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
     box(len, 0.2, 0.05, mat.white, W / 2, -0.06, D / 2 + s * (halfD + 0.02), kRoof);
-    box(len, 0.09, 0.11, mat.white, W / 2, -0.2, D / 2 + s * (halfD + 0.08), kRoof);
+    addGutter(kRoof, -o, W + o, D / 2 + s * (halfD + 0.08), D / 2 + s * (D / 2 + 0.17), [0.25, W - 0.25], -(F + H) + 0.05);
     for (const x of [-o, W + o]) {
       box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
       slopedSoffit(o, slope, x > 0 ? W + o / 2 : -o / 2, rise / 2, D / 2 + s * halfD / 2, s * ang, kRoof);
@@ -1518,6 +1546,22 @@ let kRoof;
   // суцільний цементний під'їзд від воріт і хвіртки до асфальту
   const ax0 = plot.wicket.x - plot.wicket.width / 2, ax1 = plot.gate.x + plot.gate.width / 2, az1 = STREET.z0;
   box(ax1 - ax0, 0.04, az1 - gz, concrete, (ax0 + ax1) / 2, y, (gz + az1) / 2);
+  // відмостка: цементна заливка по периметру хати 60 см, щоб вода не підтікала під фундамент
+  const hx = house.position[0], hz = house.position[1];
+  const px0 = hx - house.w - 0.3, px1 = hx + 0.3, pz0 = hz - house.d - 0.3, pz1 = hz + 0.3;   // межі цоколя у світових координатах
+  const bw = 0.6;
+  const slab = (xa, xb, za, zb) => box(xb - xa, 0.04, zb - za, concrete, (xa + xb) / 2, y, (za + zb) / 2);
+  slab(px0 - bw, wallX - w / 2, pz1, pz1 + bw);                  // з боку вулиці (глуха стіна)
+  slab(px0 - bw, px0, pz0 - bw, pz1);                            // західний бік
+  slab(px0 - bw, hx - 9.3, pz0 - bw, pz0);                       // північ, західніше тераси (настил тераси закінчується на x = hx - 9.3)
+  slab(deckX, wallX + w / 2, entryZ - w / 2, pz0);               // північ, східніше тераси: заливка до доріжки
+  // рівчачки у відмостці від водостічних труб до газону
+  const groove = new THREE.MeshStandardMaterial({ color: 0x8d8b84, roughness: 1 });
+  const gro = (x, za, zb) => box(0.1, 0.004, Math.abs(zb - za), groove, x, y + 0.022, (za + zb) / 2);   // в рівень із заливкою
+  for (const gx of [hx - 0.25, hx - (house.w - 0.25)]) {
+    gro(gx, pz0 + 0.04, gx > hx - 5 ? entryZ - w / 2 : pz0 - bw);   // північний бік: від труби в бік газону (біля доріжки — крізь усю заливку)
+    gro(gx, pz1 - 0.04, pz1 + bw);                         // з боку вулиці
+  }
   const tz1 = 20;                                                                                      // колії вздовж смуги проїзду
   for (const s of [-1, 1]) box(0.6, 0.04, gz - tz1, concrete, plot.gate.x + s * 0.8, y, (gz + tz1) / 2);
 })();
