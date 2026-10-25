@@ -413,10 +413,69 @@ function buildWall(w) {
         alongX ? new THREE.BoxGeometry(o.w, o.h, 0.04) : new THREE.BoxGeometry(0.04, o.h, o.w), mat.glass);
       pane.position.set(alongX ? ax + o.at : ax, gy, alongX ? az : az + o.at);
       houseGroup.add(pane);
+      addBlinds(o, alongX, ax, az);
+      if (alongX || ax < 1) addTulle(o, alongX, ax, az);                  // тюль і карниз — у кімнатах; у ванній і туалеті (східна стіна) лише жалюзі
     }
     cursor = r;
   }
   piece(cursor, L + half, 0, w.h);
+}
+// білі горизонтальні жалюзі всередині віконного прорізу: верхня планка, опущені на ~60% ламелі (трохи прочинені), нижня планка й шнурки
+const blindMat = new THREE.MeshStandardMaterial({ color: 0xf4f2ec, roughness: 0.55 });
+function addBlinds(o, alongX, ax, az) {
+  const inward = alongX ? (az < house.d / 2 ? 1 : -1) : (ax < house.w / 2 ? 1 : -1);        // у бік кімнати
+  const grp = new THREE.Group();
+  const off = 0.1;                                                                             // від осі стіни до жалюзі (всередині укосу)
+  grp.position.set(alongX ? ax + o.at : ax + inward * off, FLOOR_Y + o.sill + o.h / 2, alongX ? az + inward * off : az + o.at);
+  grp.rotation.y = alongX ? (inward > 0 ? 0 : Math.PI) : inward > 0 ? Math.PI / 2 : -Math.PI / 2;   // локальний +z — у кімнату
+  houseGroup.add(grp);
+  const w = o.w - 0.03, h = o.h - 0.03, top = h / 2;
+  const drop = h * 0.6, pitch = 0.026, n = Math.floor(drop / pitch);
+  const slats = new THREE.InstancedMesh(new THREE.BoxGeometry(w, 0.004, 0.03), blindMat, n);
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.45, 0, 0));
+  for (let i = 0; i < n; i++) { m4.compose(new THREE.Vector3(0, top - 0.04 - i * pitch, 0), q, new THREE.Vector3(1, 1, 1)); slats.setMatrixAt(i, m4); }
+  slats.castShadow = true;
+  grp.add(slats);
+  const rail = (y, d) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w + 0.01, 0.035, d), blindMat); b.position.set(0, y, 0); grp.add(b); };
+  rail(top - 0.015, 0.045);                                                                    // верхня коробка
+  rail(top - 0.04 - n * pitch, 0.02);                                                          // нижня планка
+  for (const sx of [-1, 1]) {                                                                  // шнурки
+    const c = new THREE.Mesh(new THREE.BoxGeometry(0.004, n * pitch, 0.004), blindMat);
+    c.position.set(sx * (w / 2 - 0.05), top - 0.04 - n * pitch / 2, 0.012);
+    grp.add(c);
+  }
+}
+// білий тюль на карнизі, змонтованому на стіні вгорі (стеля натяжна): труба на кронштейнах над вікном, тюль із м'якими складками;
+// у спальнях і вітальні (ванна й туалет — лише жалюзі); тюль до підлоги
+const tulleMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false });
+const rodMat = new THREE.MeshStandardMaterial({ color: 0xe8e6df, roughness: 0.35, metalness: 0.3 });
+function addTulle(o, alongX, ax, az) {
+  const inward = alongX ? (az < house.d / 2 ? 1 : -1) : (ax < house.w / 2 ? 1 : -1);
+  const grp = new THREE.Group();
+  const off = 0.2 + 0.08;                                                                      // 0.2 — до внутрішньої поверхні стіни, ще 8 см — виніс карниза
+  grp.position.set(alongX ? ax + o.at : ax + inward * off, FLOOR_Y, alongX ? az + inward * off : az + o.at);
+  grp.rotation.y = alongX ? (inward > 0 ? 0 : Math.PI) : inward > 0 ? Math.PI / 2 : -Math.PI / 2;   // локальний +z — у кімнату
+  houseGroup.add(grp);
+  const Wt = o.w + 0.5, yRod = 2.5, yBot = 0.04;
+  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, Wt + 0.2, 12), rodMat);
+  rod.rotation.z = Math.PI / 2; rod.position.set(0, yRod, 0); rod.castShadow = true; grp.add(rod);
+  for (const sx of [-1, 1]) {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), rodMat); cap.position.set(sx * (Wt / 2 + 0.1), yRod, 0); grp.add(cap);
+    const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.08), rodMat); bracket.position.set(sx * (Wt / 2 - 0.1), yRod, -0.04); grp.add(bracket);
+  }
+  const mid = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.08), rodMat); mid.position.set(0, yRod, -0.04); grp.add(mid);
+  const hgt = yRod - 0.02 - yBot;
+  const geo = new THREE.PlaneGeometry(Wt, hgt, 70, 1);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {                                                         // складки по ширині; внизу трохи глибші
+    const x = pos.getX(i), t = (hgt / 2 - pos.getY(i)) / hgt;                                   // 0 угорі … 1 внизу
+    pos.setZ(i, (0.012 + 0.024 * t) * Math.sin(x * 2 * Math.PI / 0.14));
+  }
+  geo.computeVertexNormals();
+  const cloth = new THREE.Mesh(geo, tulleMat);
+  cloth.position.set(0, (yRod - 0.02 + yBot) / 2, 0.005);
+  cloth.renderOrder = 2;
+  grp.add(cloth);
 }
 walls.forEach(buildWall);
 
@@ -2452,20 +2511,20 @@ renderer.setAnimationLoop(() => {
   addCollider(6.68, 7.08, S - 0.38, S);
 
   // --- спільний письмовий стіл 1.8 x 0.7 під вікном: світла стільниця, білі тумби-ніжки, полиця на столі ---
-  const dx0 = 7.0, dx1 = 8.8, dz0 = N, dz1 = N + 0.7, TY = 0.75;
+  const dx0 = 7.0, dx1 = 8.8, dz0 = N + 0.2, dz1 = N + 0.9, TY = 0.75;    // стіл відсунутий від стіни на 20 см (за тюль)
   blk(wood, dx0, dx1, TY - 0.03, TY, dz0, dz1);
   for (const x of [dx0 + 0.03, dx1 - 0.03]) blk(white, x - 0.03, x + 0.03, 0, TY - 0.03, dz0 + 0.03, dz1 - 0.03);      // бокові панелі
   blk(white, dx0 + 0.06, dx1 - 0.06, 0.64, 0.72, dz0 + 0.03, dz0 + 0.06);                                           // тонка рейка біля стіни для жорсткості (високо — ноги не заважає)
   addCollider(dx0, dx1, dz0, dz1);
   // два зошити, пенал, настільна лампа ліворуч
   const note = (x, z, rot, c) => { const o = box(0.21, 0.012, 0.3, new THREE.MeshStandardMaterial({ color: c, roughness: 0.8 }), x, base + TY + 0.006, z, g); o.rotation.y = rot; };
-  note(7.65, 0.65, 0.12, 0x3f6f9a); note(8.45, 0.65, -0.1, 0x6b8fb0);
+  note(7.65, 0.85, 0.12, 0x3f6f9a); note(8.45, 0.85, -0.1, 0x6b8fb0);
   const holder = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.1, 16), dark);
-  holder.position.set(8.05, base + TY + 0.05, 0.4); g.add(holder);
+  holder.position.set(8.05, base + TY + 0.05, 0.6); g.add(holder);
   const lamp = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.14, 20, 1, true), new THREE.MeshStandardMaterial({ color: 0xf6efe0, emissive: 0xffe2b0, emissiveIntensity: 0.4, side: THREE.DoubleSide }));
-  lamp.position.set(7.15, base + TY + 0.32, 0.4); g.add(lamp);
-  box(0.012, 0.28, 0.012, dark, 7.15, base + TY + 0.15, 0.4, g);
-  box(0.1, 0.012, 0.1, dark, 7.15, base + TY + 0.006, 0.4, g);
+  lamp.position.set(7.15, base + TY + 0.32, 0.6); g.add(lamp);
+  box(0.012, 0.28, 0.012, dark, 7.15, base + TY + 0.15, 0.6, g);
+  box(0.1, 0.012, 0.1, dark, 7.15, base + TY + 0.006, 0.6, g);
 
   // --- два зручні офісні крісла: сірий текстиль, середня спинка з профільним сидінням, підлокітники, п'ятипроменева основа ---
   const fabric = new THREE.MeshStandardMaterial({ color: 0x57626b, roughness: 0.95 });
@@ -2502,8 +2561,8 @@ renderer.setAnimationLoop(() => {
     }
     addCollider(x - 0.32, x + 0.32, z - 0.32, z + 0.34);
   };
-  officeChair(7.45, 1.4, 0.08);
-  officeChair(8.4, 1.45, -0.12);
+  officeChair(7.45, 1.6, 0.08);
+  officeChair(8.4, 1.65, -0.12);
 })();
 
 
