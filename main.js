@@ -266,17 +266,59 @@ function box(w, h, d, material, x, y, z, parent = scene) {
   box(wl, 0.06, 0.06, steel, wl / 2 + 0.02, 0.13, 0, wp);
   box(0.04, 0.4, 0.06, steel, wl - 0.1, 1.0, 0.04, wp);
   run(-hw, -hd, -hw, hd);
+  // ловець м'ячів за баскетбольним кільцем: три стовпи заввишки 4.7 м (z 5, 7.5, 10) і висока сітка між ними, щоб м'яч не вилітав за паркан
+  const stopH = 4.7;
+  for (const z of [5, 7.5, 10]) pipe(0.035, stopH - (fh + 0.1), -hw, (stopH + fh + 0.1) / 2, z);
+  wireMesh(5, stopH - fh, -hw, (stopH + fh) / 2, 7.5, true);
   run(hw, -hd, hw, hd);
 })();
 
 // дерева
-[[-12, -32], [11, -28], [-11, -12], [12, -3], [-11, 6], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
+[[-12, -32], [11, -28], [-11, -12], [12, -3], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
   box(0.35, 3, 0.35, mat.trunk, x, 1.5, z);
   const crown = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), mat.leaf);
   crown.position.set(x, 4.6, z);
   crown.castShadow = true;
   scene.add(crown);
 });
+
+// майданчик 5 x 4 м (20 м²): бетонна стяжка з білою розміткою по периметру і баскетбольний щит із кільцем; усе зібрано в локальних координатах
+// навколо центру (cx, cz) і повернуто на 90°, тож кільце стоїть на західному краю, до сітки паркану (щит дивиться на схід, на майданчик)
+(function buildCourt() {
+  const CX = -11.4, CZ = 8, W = 5, D = 4, y = 0.02;
+  const g = new THREE.Group();
+  g.position.set(CX, 0, CZ);
+  g.rotation.y = Math.PI / 2;
+  scene.add(g);
+  const concrete = new THREE.MeshStandardMaterial({ color: 0xb4b2ab, roughness: 1 });
+  const line = new THREE.MeshStandardMaterial({ color: 0xf0eee6, roughness: 0.9 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x4a4f55, roughness: 0.5, metalness: 0.2 });
+  const orange = new THREE.MeshStandardMaterial({ color: 0xe8541c, roughness: 0.45 });
+  const bx = (w, h, d, m, x, yy, z) => box(w, h, d, m, x, yy, z, g);
+  bx(W, 0.04, D, concrete, 0, y, 0).receiveShadow = true;
+  const lw = 0.05, ly = 0.042;
+  bx(W - 0.3, 0.004, lw, line, 0, ly, -D / 2 + 0.15);
+  bx(W - 0.3, 0.004, lw, line, 0, ly, D / 2 - 0.15);
+  bx(lw, 0.004, D - 0.3, line, -W / 2 + 0.15, ly, 0);
+  bx(lw, 0.004, D - 0.3, line, W / 2 - 0.15, ly, 0);
+  // стійка за краєм стяжки (локально -z), щит дивиться на майданчик
+  const pz = -D / 2 - 0.35;
+  bx(0.12, 3.3, 0.12, steel, 0, 1.65, pz);
+  bx(0.08, 0.08, 0.5, steel, 0, 3.15, pz + 0.25);                         // винос до щита
+  bx(1.2, 0.9, 0.03, new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.2, transparent: true, opacity: 0.75 }), 0, 3.2, pz + 0.52);   // щит
+  const mark = new THREE.MeshStandardMaterial({ color: 0xd8321c, roughness: 0.6 });
+  for (const [w, h, dx, dy] of [[0.59, 0.03, 0, -0.14], [0.59, 0.03, 0, 0.16], [0.03, 0.33, -0.28, 0.01], [0.03, 0.33, 0.28, 0.01]]) bx(w, h, 0.01, mark, dx, 3.06 + dy + 0.14, pz + 0.54);   // червоний квадрат на щиті
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.23, 0.012, 8, 28), orange);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.set(0, 3.05, pz + 0.52 + 0.015 + 0.25);
+  rim.castShadow = true;
+  g.add(rim);
+  bx(0.06, 0.02, 0.2, orange, 0, 3.05, pz + 0.55 + 0.02);                 // кронштейн кільця
+  const net = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.13, 0.4, 12, 1, true), new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.9, wireframe: true }));
+  net.position.set(0, 2.85, pz + 0.52 + 0.015 + 0.25);
+  g.add(net);
+  colliders.push({ minX: CX + pz - 0.1, maxX: CX + pz + 0.1, minZ: CZ - 0.1, maxZ: CZ + 0.1 });   // поворот на 90°: локальний -z → світовий -x
+})();
 
 // ---------- хата ----------
 const houseGroup = new THREE.Group();
@@ -1692,6 +1734,7 @@ let kRoof;
     gro(gx, pz0 + 0.04, gx > hx - 5 ? entryZ - w / 2 : pz0 - bw);   // північний бік: від труби в бік газону (біля доріжки — крізь усю заливку)
     gro(gx, pz1 - 0.04, pz1 + bw);                         // з боку вулиці
   }
+  box(0.7, 0.04, plot.d - 0.2, concrete, -plot.w / 2 + 0.35 + 0.15, y, 0);                          // доріжка 70 см уздовж західного паркану на всю довжину подвір'я (відступ 15 см від сітки)
   const tz1 = house.position[1] - house.d - 0.2;                                                  // колії вздовж смуги проїзду: до північних граней стін хати й літньої кухні (z 23.8)
   for (const s of [-1, 1]) box(0.6, 0.04, gz - tz1, concrete, plot.gate.x + s * 0.8, y, (gz + tz1) / 2);
 })();
@@ -3102,6 +3145,10 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
+
 
 
 
