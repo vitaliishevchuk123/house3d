@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { feature } from 'topojson-client';
 import { plot, house, walls, floors, ceilingDrop } from './plan.js';
 
@@ -1823,6 +1824,58 @@ let kRoof;
     part(new THREE.CylinderGeometry(0.06, 0.06, 0.015, 16), black, 0, 0, face * 1.1).rotation.x = Math.PI / 2;
     for (let k = 0; k < 5; k++) part(new THREE.BoxGeometry(0.38, 0.03, 0.012), black, 0, 0, face * 1.08).rotation.z = k * Math.PI / 5;
   }
+  // справжня модель Renault Scenic II (2003–2009), автор szymonpasterczyk734, CC BY 4.0, Sketchfab: після завантаження заміняє зібрану вище
+  // (вона лишається запасною, якщо файл не завантажиться). У файлі довга вісь уздовж +Z, спереду +Z, тож повертаємо на +x
+  new GLTFLoader().load('art/scenic.glb', gltf => {
+    const pivot = new THREE.Group();
+    const m = gltf.scene;
+    m.updateMatrixWorld(true);
+    const stray = [];                                                         // у файлі є два зайві «листи» довші за машину (відблиски), вони стирчать спереду й піднімають авто
+    m.traverse(o => {
+      if (!o.isMesh) return;
+      if (new THREE.Box3().setFromObject(o).getSize(new THREE.Vector3()).z > 4.6) { stray.push(o); return; }
+      o.castShadow = true;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      mats.forEach(mm => {
+        if (mm.name === 'scenicbody') { mm.color.set(0x23282f); mm.metalness = 0.25; mm.roughness = 0.35; }
+        if (/^wheel/.test(mm.name)) {                                     // 006 і 005 — шина, решта — диск
+          const tyre = /[._]00[56]/.test(mm.name);
+          mm.color.set(tyre ? 0x070708 : 0x9a9ea3); mm.metalness = tyre ? 0.1 : 0.5; mm.roughness = tyre ? 0.9 : 0.4;
+        }
+        if (mm.name === 'scenic2_tail') { o.material = mm = mm.clone(); mm.color.set(0x6a0c0c); mm.transparent = true; mm.opacity = 0.72; mm.roughness = 0.1; mm.depthWrite = false; }   // червоне скло задніх ліхтарів — прозоре, видно відбивач
+        if (mm.name === 'scenic2_lowbeam') { mm.color.set(0x9aa3aa); mm.metalness = 0.55; mm.roughness = 0.25; }                // відбивач фари: хромований, а не білий
+        if (mm.name === 'scenic2_red') { mm.color.set(0xd01414); mm.emissive.set(0x3a0505); mm.roughness = 0.25; }
+        if (/glass/.test(mm.name)) {                                      // вікна й скло фар (по краях кузова) — з легким тонуванням
+          const lamp = Math.abs(new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()).z) > 1.55;
+          o.material = mm = mm.clone();
+          mm.color.set(0x32424e); mm.metalness = 0; mm.roughness = lamp ? 0 : 0.05; mm.transparent = true; mm.opacity = 0.5; mm.depthWrite = false;   // фари тоновані так само, як вікна
+        }
+      });
+    });
+    stray.forEach(o => o.parent.remove(o));
+    // у файлі лише одне колесо в нулі координат (без розстановки): ставимо його на чотири місця (колісна база 2.69 м, колія 1.44 м), ліві — розвернуті
+    const w0 = m.getObjectByName('wheel_rf_dummy001');
+    if (w0) for (const [x, y] of [[0.72, -1.35], [-0.72, -1.35], [0.72, 1.34], [-0.72, 1.34]]) {
+      const w = w0.clone(true);
+      w.position.set(x, y, 0.29);
+      if (x < 0) w.rotation.z = Math.PI;
+      w0.parent.add(w);
+    }
+    if (w0) w0.parent.remove(w0);
+    const box = new THREE.Box3().setFromObject(m);
+    const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    const k = 4.25 / size.z;
+    m.scale.setScalar(k);
+    m.position.set(-c.x * k, -box.min.y * k, -c.z * k);
+    pivot.add(m);
+    pivot.rotation.y = Math.PI / 2;
+    car.children.slice().forEach(ch => car.remove(ch));
+    car.add(pivot);
+    const credit = document.createElement('div');                              // вимога ліцензії CC BY 4.0: вказати автора моделі
+    credit.style.cssText = 'position:fixed;right:10px;bottom:8px;font:11px system-ui,sans-serif;color:rgba(255,255,255,.7);text-shadow:0 0 3px #000;pointer-events:none';
+    credit.innerHTML = 'Модель авто: «Renault Scenic II 2003-2009», szymonpasterczyk734, CC BY 4.0 (Sketchfab)';
+    document.body.appendChild(credit);
+  }, undefined, err => console.warn('scenic.glb не завантажився, лишається проста модель', err));
   car.position.set(plot.gate.x, 0.04, 36);
   car.rotation.y = Math.PI / 2;                                                                    // носом на північ, до хати
   scene.add(car);
@@ -3049,4 +3102,9 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
+
+
 
