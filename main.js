@@ -278,13 +278,14 @@ function box(w, h, d, material, x, y, z, parent = scene) {
 })();
 
 // дерева
-[[-12, -32], [11, -28], [-11, -12], [10, 10], [12, 16], [-9, -20]].forEach(([x, z]) => {
-  box(0.35, 3, 0.35, mat.trunk, x, 1.5, z);
-  const crown = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 10), mat.leaf);
-  crown.position.set(x, 4.6, z);
+function addTree(x, z, k = 1) {                                                // k — масштаб дерева
+  box(0.35 * k, 3 * k, 0.35 * k, mat.trunk, x, 1.5 * k, z);
+  const crown = new THREE.Mesh(new THREE.SphereGeometry(2.2 * k, 12, 10), mat.leaf);
+  crown.position.set(x, 4.6 * k, z);
   crown.castShadow = true;
   scene.add(crown);
-});
+}
+[[-12, -32], [11, -28], [-11, -12], [-9, -20]].forEach(([x, z]) => addTree(x, z));
 
 // майданчик 7 x 7 м (49 м²): бетонна стяжка з білою розміткою по периметру і баскетбольний щит із кільцем; усе зібрано в локальних координатах
 // навколо центру (cx, cz) і повернуто на 90°, тож кільце стоїть на західному краю, до сітки паркану (щит дивиться на схід, на майданчик)
@@ -424,6 +425,100 @@ let toggleTestPlayer = () => {};
   };
   goal(X0, +1);
   goal(X1, -1);
+})();
+
+// міні-парк за футбольним полем (x -9..11, z -36..-12): одна залита бетонна доріжка 1.4 м по центру від поля до північного краю, у її середині лавка,
+// а навколо й по всьому парку густо посаджені дерева
+(function buildPark() {
+  const concrete = new THREE.MeshStandardMaterial({ color: 0xb4b2ab, roughness: 1 });
+  const wood = new THREE.MeshStandardMaterial({ color: 0x9a7248, roughness: 0.8 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2f3438, roughness: 0.5, metalness: 0.3 });
+  const ax = 1, y = 0.02, w = 1.4, zFar = -34, zNear = -10.2;
+  box(w, 0.04, zNear - zFar, concrete, ax, y, (zNear + zFar) / 2).receiveShadow = true;
+  // лавка посередині доріжки (z ≈ -22), збоку, сидінням до доріжки, спиною від неї; довга сторона вздовж z
+  const g = new THREE.Group();
+  const bx0 = ax - w / 2 - 0.4, bz0 = (zNear + zFar) / 2;
+  g.position.set(bx0, 0, bz0);
+  scene.add(g);
+  const part = (gw, gh, gd, m, px, py, pz) => { const o = box(gw, gh, gd, m, px, py, pz, g); o.castShadow = true; return o; };
+  for (const zz of [-0.2, 0, 0.2]) part(0.14, 0.04, 1.6, wood, zz, 0.45, 0);
+  for (const yy of [0.62, 0.8]) part(0.04, 0.12, 1.6, wood, -0.26, yy, 0);
+  for (const zz of [-0.7, 0.7]) { part(0.5, 0.04, 0.05, steel, 0, 0.43, zz); part(0.05, 0.43, 0.05, steel, 0.2, 0.215, zz); part(0.05, 0.43, 0.05, steel, -0.2, 0.215, zz); part(0.05, 0.5, 0.05, steel, -0.26, 0.68, zz); }
+  colliders.push({ minX: bx0 - 0.35, maxX: bx0 + 0.35, minZ: bz0 - 0.85, maxZ: bz0 + 0.85 });
+  // дерева: по периметру парку й всередині, ні на доріжці, ні на лавці; масштаб трохи різний
+  const trees = [
+    [-7.5, -16], [-7.5, -24], [-7.5, -28], [-7.5, -32], [9.5, -16], [9.5, -20], [9.5, -24], [9.5, -32],
+    [-5, -34], [-2, -34], [4, -34], [7, -34], [-5, -14.5], [-2.5, -14.5], [4.5, -14.5], [7.5, -14.5],
+    [-4, -19], [-4, -23.5], [-4, -29], [-1.5, -26], [-1.5, -31], [-1.5, -17.5], [4.5, -18.5], [4.5, -23], [4.5, -28.5], [7, -21], [7, -26], [7, -30],
+  ];
+  trees.forEach(([tx, tz], i) => addTree(tx, tz, 0.75 + ((i * 37) % 11) / 40));
+})();
+
+// город у самому кінці подвір'я (за парком, z -39.6..-36.4): три ряди грядок по дві секції — навколо осьової доріжки парку.
+// Крайні ряди — томати, середній — квасоля; на кожній секції з країв і через ~4 м стоять невисокі стовпчики, між ними натягнута сітка-шпалера,
+// по якій в'ються рослини (томати з червоними плодами, квасоля зі стручками)
+(function buildGarden() {
+  const soil = new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 1 });
+  const postM = new THREE.MeshStandardMaterial({ color: 0x8a6a45, roughness: 0.9 });
+  const rows = [{ z: -39.1, kind: 'tomato', h: 1.5 }, { z: -37.9, kind: 'bean', h: 1.8 }, { z: -36.7, kind: 'tomato', h: 1.5 }];
+  const secs = [[-13.4, -0.8, false], [2.8, 13.4, true]], bw = 0.7, bh = 0.02;                // ґрунт врівень із газоном; шпалери лише на східній (правій) секції
+  const netTex = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 32;
+    const g = c.getContext('2d');
+    g.strokeStyle = '#d8d4c0'; g.lineWidth = 2.5;
+    g.strokeRect(0, 0, 32, 32);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+    return t;
+  })();
+  const hash = i => (((i + 1) * 2654435761) >>> 0) / 4294967296;                     // детермінований «випадковий» розкид
+  const leaves = [], fruits = [], pods = [];
+  let k = 0;
+  for (const { z, kind, h } of rows) for (const [x0, x1, trellis] of secs) {
+    box(x1 - x0, bh, bw, soil, (x0 + x1) / 2, bh / 2, z).receiveShadow = true;
+    if (!trellis) {                                                                  // звичайні грядки: два рядки невисокої зелені
+      for (let x = x0 + 0.3; x < x1 - 0.2; x += 0.45, k++) for (const dz of [-0.17, 0.17]) {
+        const r = hash(k * 5 + (dz > 0 ? 1 : 0)), sc = 0.1 + r * 0.06;
+        leaves.push([x, bh + 0.07 + sc * 0.4, z + dz, sc, 0.27 + r * 0.05]);
+      }
+      continue;
+    }
+    // стовпчики: з країв і приблизно через 4 м; зверху дротина
+    const len = x1 - x0, n = Math.ceil(len / 4.2);
+    for (let i = 0; i <= n; i++) box(0.05, h, 0.05, postM, x0 + 0.1 + (len - 0.2) * i / n, h / 2, z).castShadow = true;
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, len - 0.1, 6), postM);
+    top.rotation.z = Math.PI / 2; top.position.set((x0 + x1) / 2, h, z); scene.add(top);
+    // сітка
+    const t = netTex.clone(); t.needsUpdate = true; t.repeat.set((len - 0.2) / 0.12, (h - bh) / 0.12);
+    const net = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.2, h - bh), new THREE.MeshStandardMaterial({ map: t, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide, roughness: 0.7 }));
+    net.position.set((x0 + x1) / 2, bh + (h - bh) / 2, z);
+    scene.add(net);
+    // рослини, що в'ються по сітці
+    const step = kind === 'tomato' ? 0.5 : 0.36;
+    for (let x = x0 + 0.3; x < x1 - 0.25; x += step, k++) {
+      const levels = kind === 'tomato' ? 4 : 5;
+      for (let l = 0; l < levels; l++) {
+        const r = hash(k * 7 + l);
+        const y = bh + 0.2 + (h - bh - 0.3) * (l / (levels - 1)) + (r - 0.5) * 0.12;
+        const s = (kind === 'tomato' ? 0.15 : 0.11) * (0.85 + r * 0.5);
+        leaves.push([x + (r - 0.5) * 0.1, y, z + (hash(k * 3 + l) - 0.5) * 0.14, s, kind === 'tomato' ? 0.3 + r * 0.04 : 0.24 + r * 0.05]);
+        if (kind === 'tomato' && l < 3) for (const sd of [-1, 1]) if (hash(k * 11 + l * 5 + sd) > 0.2) fruits.push([x + (hash(k + l + sd) - 0.5) * 0.25, y - 0.1 - hash(l + k) * 0.1, z + sd * 0.17]);
+        if (kind === 'bean' && l > 0) for (const sd of [-1, 1]) if (hash(k * 13 + l * 3 + sd) > 0.4) pods.push([x + (hash(k * 2 + l) - 0.5) * 0.2, y - 0.1, z + sd * 0.1]);
+      }
+    }
+  }
+  const inst = (geo, mat, list, place) => {
+    const m = new THREE.InstancedMesh(geo, mat, list.length), mm = new THREE.Matrix4(), c = new THREE.Color();
+    list.forEach((p, i) => { place(mm, c, p, i); m.setMatrixAt(i, mm); if (m.setColorAt && c.isColor) m.setColorAt(i, c); });
+    m.castShadow = true; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    scene.add(m);
+    return m;
+  };
+  inst(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9 }), leaves, (mm, c, [x, y, z, s, hue]) => {
+    mm.makeScale(s * 1.25, s * 0.9, s); mm.setPosition(x, y, z); c.setHSL(hue, 0.55, 0.26 + (s % 0.07) * 2);
+  });
+  inst(new THREE.SphereGeometry(0.058, 8, 6), new THREE.MeshStandardMaterial({ color: 0xd8321c, roughness: 0.5 }), fruits, (mm, c, [x, y, z]) => { mm.makeTranslation(x, y, z); c.set(0xffffff); });
+  inst(new THREE.CylinderGeometry(0.012, 0.009, 0.16, 5), new THREE.MeshStandardMaterial({ color: 0x8cc63f, roughness: 0.7 }), pods, (mm, c, [x, y, z]) => { mm.makeTranslation(x, y, z); c.set(0xffffff); });
 })();
 
 // ---------- хата ----------
@@ -3252,6 +3347,11 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
+
+
 
 
 
