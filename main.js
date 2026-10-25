@@ -599,6 +599,40 @@ for (const d of doors) {
   houseGroup.add(m);
 }
 
+// біла вагонка для підшивки стель під звисами даху, під дашком тераси й у літній кухні
+const vagTex = (vertical) => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f4f2ea';
+  g.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 8; i++) {                                    // 8 дощок на текстуру, по 16 пікселів
+    g.fillStyle = '#c9c5b9';
+    vertical ? g.fillRect(i * 16, 0, 2, 128) : g.fillRect(0, i * 16, 128, 2);
+    g.fillStyle = '#fffdf6';
+    vertical ? g.fillRect(i * 16 + 2, 0, 1, 128) : g.fillRect(0, i * 16 + 2, 128, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+};
+const vagTexV = vagTex(true), vagTexH = vagTex(false);
+// дошки вагонки завтовшки 2 см; runsAlong — вздовж якої осі мають йти дошки (x або z)
+function vagBox(w, d, x, y, z, parent, runsAlong, rotX = 0, h = 0.02) {
+  const t = (runsAlong === 'x' ? vagTexH : vagTexV).clone();
+  t.needsUpdate = true;
+  t.repeat.set(w / 0.8, d / 0.8);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ map: t, roughness: 0.55 }));
+  m.position.set(x, y, z);
+  m.rotation.x = rotX;
+  parent.add(m);
+  return m;
+}
+// підшивка вздовж скату: центр плити (cx, cy, cz) і кут θ (rotation.x), зсув на 7.5 см униз по нормалі
+const slopedSoffit = (w, d, cx, cy, cz, theta, parent) =>
+  vagBox(w, d, cx, cy - 0.075 * Math.cos(theta), cz - 0.075 * Math.sin(theta), parent, 'z', theta);
+
 // дах (двосхилий, гребінь уздовж x)
 const roof = new THREE.Group();
 roof.position.y = FLOOR_Y + house.wallHeight;
@@ -618,7 +652,9 @@ houseGroup.add(roof);
     for (const x of [-o, house.w + o]) {
       const rake = box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, house.d / 2 + s * halfD / 2, roof);
       rake.rotation.x = s * ang;
+      slopedSoffit(o, slope, x > 0 ? house.w + o / 2 : -o / 2, rise / 2, house.d / 2 + s * halfD / 2, s * ang, roof);   // під звисом фронтону
     }
+    vagBox(len, o - 0.2, house.w / 2, -0.1, house.d / 2 + s * (house.d / 2 + (0.2 + o) / 2), roof, 'x');   // під карнизом
   }
   // водостічні труби по кутах фасаду
   for (const x of [-o + 0.15, house.w + o - 0.15]) {
@@ -1225,6 +1261,7 @@ const art = (() => {
   const roofLen = Math.hypot(rz1 - rz0, hi - lo);
   const pr = box(x1 - x0 + 0.5, 0.1, roofLen, mat.roof, (x0 + x1) / 2, (hi + lo) / 2 + 0.05, (rz0 + rz1) / 2, g);
   pr.rotation.x = Math.atan2(hi - lo, rz1 - rz0);
+  slopedSoffit(x1 - x0 + 0.5, roofLen, (x0 + x1) / 2, (hi + lo) / 2 + 0.05, (rz0 + rz1) / 2, pr.rotation.x, g);   // вагонка під дашком тераси
   box(x1 - x0 + 0.5, 0.18, 0.05, mat.white, (x0 + x1) / 2, lo - 0.05, rz1 + 0.02, g);
 })();
 
@@ -1264,11 +1301,11 @@ const art = (() => {
     mk(new THREE.BoxGeometry(0.6, 0.04, 0.04), frame, 0, 0.1, 0, back);
     addCollider(x - 0.33, x + 0.33, z - 0.33, z + 0.33);
   };
-  rocker(5.0, 10.2, 0.4);
-  rocker(6.1, 10.2, -0.4);
+  rocker(4.8, 9.75, 0.25);               // упритул до стіни (z0 = 9.2), щоб терасою можна було пройти
+  rocker(6.3, 9.75, -0.25);
 
   // круглий столик між кріслами
-  const tx = 5.55, tz = 10.2;
+  const tx = 5.55, tz = 9.75;
   mk(new THREE.CylinderGeometry(0.27, 0.27, 0.035, 32), seatM, tx, deckTop + 0.55, tz, g);
   mk(new THREE.CylinderGeometry(0.03, 0.03, 0.52, 12), frame, tx, deckTop + 0.285, tz, g);
   mk(new THREE.CylinderGeometry(0.17, 0.2, 0.03, 24), frame, tx, deckTop + 0.015, tz, g);
@@ -1365,7 +1402,11 @@ let kRoof;
     box(len, 0.12, slope, mat.roof, W / 2, rise / 2, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
     box(len, 0.2, 0.05, mat.white, W / 2, -0.06, D / 2 + s * (halfD + 0.02), kRoof);
     box(len, 0.09, 0.11, mat.white, W / 2, -0.2, D / 2 + s * (halfD + 0.08), kRoof);
-    for (const x of [-o, W + o]) box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
+    for (const x of [-o, W + o]) {
+      box(0.06, 0.2, slope, mat.white, x, rise / 2 + 0.08, D / 2 + s * halfD / 2, kRoof).rotation.x = s * ang;
+      slopedSoffit(o, slope, x > 0 ? W + o / 2 : -o / 2, rise / 2, D / 2 + s * halfD / 2, s * ang, kRoof);
+    }
+    vagBox(len, o, W / 2, -0.1, D / 2 + s * (D / 2 + o / 2), kRoof, 'x');
   }
   const gshape = new THREE.Shape([new THREE.Vector2(-D / 2, 0), new THREE.Vector2(D / 2, 0), new THREE.Vector2(0, rise)]);
   for (const x of [0.02, W - 0.02]) {
@@ -1374,7 +1415,7 @@ let kRoof;
     g2.position.set(x, 0, D / 2);
     kRoof.add(g2);
   }
-  box(W - 2 * T, 0.04, D - 2 * T, mat.white, W / 2, -0.02, D / 2, kRoof);          // біла стеля
+  vagBox(W - 2 * T, D - 2 * T, W / 2, -0.02, D / 2, kRoof, 'x', 0, 0.04);          // стеля, підшита білою вагонкою
 
   // лампочки: по одній у кожній кімнаті
   for (const xc of [1.97, 5.43]) {
