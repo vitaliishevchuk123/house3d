@@ -1143,6 +1143,45 @@ box(0.9, 0.2, 1.3, mat.foundation, house.w + 0.2 + 0.45, 0.1, 5.19, houseGroup);
   chair(tx1 + 0.1, cz, 'x', +1);
 })();
 
+// вішалка-стійка біля входу (зліва від дверей, коли заходиш): чорна, 174 см, на круглій мармуровій основі 38 см,
+// три яруси гачків із кульками і хромоване кільце для парасольок
+(function buildCoatStand() {
+  const g = new THREE.Group();
+  g.position.set(7.1, FLOOR_Y, 8.58);
+  houseGroup.add(g);
+  const blackM = new THREE.MeshStandardMaterial({ color: 0x0c0c0d, roughness: 0.25, metalness: 0.3 });
+  const chromeM = new THREE.MeshStandardMaterial({ color: 0xd8dde0, roughness: 0.2, metalness: 0.9 });
+  const put = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; g.add(o); return o; };
+  put(new THREE.CylinderGeometry(0.19, 0.19, 0.03, 40), new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.15, metalness: 0.2 }), 0, 0.015, 0);   // мармурова основа
+  put(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 16), chromeM, 0, 0.04, 0);                       // хромований перехідник
+  put(new THREE.CylinderGeometry(0.015, 0.015, 1.74, 12), blackM, 0, 0.87, 0);                       // стійка
+  const ring = put(new THREE.TorusGeometry(0.13, 0.005, 8, 40), chromeM, 0.13, 0.54, 0);             // кільце під парасольки
+  ring.rotation.x = Math.PI / 2;
+  put(new THREE.SphereGeometry(0.016, 10, 8), blackM, 0.27, 0.54, 0);
+  put(new THREE.CylinderGeometry(0.02, 0.02, 0.1, 12), blackM, 0, 1.69, 0);                          // голівка верхнього ярусу
+  // гачок: від стійки на висоті y горизонтально на reach, потім вгору на rise і кулька
+  const hook = (ang, y, reach, rise, lift = 0) => {
+    const c = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0.015, y, 0), new THREE.Vector3(reach * 0.45, y - 0.03 + lift, 0),
+      new THREE.Vector3(reach * 0.8, y + rise * 0.3 + lift, 0), new THREE.Vector3(reach, y + rise + lift, 0)]);
+    const arm = new THREE.Group();
+    arm.add(new THREE.Mesh(new THREE.TubeGeometry(c, 14, 0.0055, 6), blackM));
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.017, 10, 8), blackM);
+    ball.position.copy(c.getPoint(1));
+    arm.add(ball);
+    arm.rotation.y = ang;
+    arm.traverse(o => { o.castShadow = true; });
+    g.add(arm);
+  };
+  for (let i = 0; i < 4; i++) {
+    hook(i * Math.PI / 2 + Math.PI / 4, 1.52, 0.2, 0.2, 0.0);                                         // довгі верхні, що йдуть вгору
+    hook(i * Math.PI / 2, 1.58, 0.17, 0.12, 0.0);
+    hook(i * Math.PI / 2 + Math.PI / 4, 1.44, 0.15, 0.05);                                            // короткі нижні
+    hook(i * Math.PI / 2, 1.06, 0.15, 0.08);                                                          // середній ярус
+  }
+  addCollider(7.1 - 0.2, 7.1 + 0.2, 8.58 - 0.2, 8.58 + 0.2);
+})();
+
 // ---------- картини ----------
 // Усе намальовано процедурно: сімейні «полотна» (мама, тато, двоє малих і немовля) та ікона «Таємна вечеря», вишита бісером.
 // Щоб замінити на справжні фото, поклади файли в папку art/ з іменами canvas1.jpg, canvas2.jpg, canvas3.jpg, supper.jpg.
@@ -1433,11 +1472,12 @@ const art = (() => {
 // 2 кімнати зі своїми дверима до смуги проїзду (ПД: інструменти, ПН: одяг у коробках і шафи).
 // Будівля збирається в локальних координатах x 0..W (довга вісь), z 0..D (поперек, z=0 — стіна з дверима до смуги), а група повернута на 90°:
 // локальна (x, z) → світова (KX + z, KZ - x)
-const KITCHEN = { x: 7.5, z: 33.0, w: 7.4, d: 4.0 };
+const KITCHEN = { x: 7.5, z: 33.2, w: 9.4, d: 4.0 };   // z і w підібрані так, щоб торці збігалися з зовнішніми гранями стін хати (z 23.8..33.2)
 let kRoof;
 (function buildSummerKitchen() {
   const KX = KITCHEN.x, KZ = KITCHEN.z, W = KITCHEN.w, D = KITCHEN.d;
-  const H = 2.5, T = 0.3, F = FLOOR_Y, o = 0.4, rise = 1.3, PX = 3.7;           // PX — перегородка між кімнатами
+  const EXT = W - 7.4;                                                         // на скільки видовжено проти першого варіанту (7.4 м); північна кімната з вмістом зсунута на EXT
+  const H = 2.5, T = 0.3, F = FLOOR_Y, o = 0.4, rise = 1.3, PX = 3.7 + EXT / 2;   // PX — перегородка між кімнатами
   const kb = new THREE.Group();
   kb.position.set(KX, 0, KZ);
   kb.rotation.y = Math.PI / 2;
@@ -1453,7 +1493,7 @@ let kRoof;
 
   // плита, цегляний цоколь по периметру (з розривами під дверима) і східчаки
   bx(0, W, 0, F, 0, D, concrete);
-  const dc = [1.85, 5.55];
+  const dc = [1.85, W - 1.85];
   bx(-0.08, 0, 0, 0.5, -0.08, D + 0.08, mat.foundation);
   bx(W, W + 0.08, 0, 0.5, -0.08, D + 0.08, mat.foundation);
   bx(0, W, 0, 0.5, D, D + 0.08, mat.foundation);
@@ -1534,7 +1574,7 @@ let kRoof;
   vagBox(W - 2 * T, D - 2 * T, W / 2, -0.02, D / 2, kRoof, 'x', 0, 0.04);          // стеля, підшита білою вагонкою
 
   // лампочки: по одній у кожній кімнаті
-  for (const xc of [1.97, 5.43]) {
+  for (const xc of [1.97, W - 1.97]) {
     const l = new THREE.PointLight(0xfff1dc, 6, 7, 1.6); l.position.set(xc, F + 2.2, D / 2); kb.add(l);
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshStandardMaterial({ color: 0xfff6dd, emissive: 0xfff1dc, emissiveIntensity: 1.2 })); bulb.position.copy(l.position); kb.add(bulb);
     cyl(0.005, 0.28, dark, xc, 2.22, D / 2);   // шнур
@@ -1543,9 +1583,10 @@ let kRoof;
   // вміст кімнат віддзеркалений уздовж довгої осі (x → W - x): інструменти в північній кімнаті, одяг і шафи в південній
   const fbO = fb, colO = col, cylO = cyl;
   {
-  const fb = (x0, x1, ...rest) => fbO(W - x1, W - x0, ...rest);
-  const col = (x0, x1, z0, z1) => colO(W - x1, W - x0, z0, z1);
-  const cyl = (r, h, m, x, y, z, rt) => cylO(r, h, m, W - x, y, z, rt);
+  const mx = x => { const m = 7.4 - x; return m > 3.7 ? m + EXT : m; };                     // віддзеркалення в межах старої довжини; північна кімната (x > 3.7) притиснута до північної стіни
+  const fb = (x0, x1, ...rest) => fbO(Math.min(mx(x1), mx(x0)), Math.max(mx(x1), mx(x0)), ...rest);
+  const col = (x0, x1, z0, z1) => colO(Math.min(mx(x1), mx(x0)), Math.max(mx(x1), mx(x0)), z0, z1);
+  const cyl = (r, h, m, x, y, z, rt) => cylO(r, h, m, mx(x), y, z, rt);
   // ---------- кімната з інструментами (x 0.3..3.64 до віддзеркалення, z 0.3..3.7) ----------
   // верстак під вікном уздовж торцевої стіни
   fb(0.3, 0.95, 0.88, 0.94, 1.3, 3.5, wood, true);
@@ -1595,8 +1636,8 @@ let kRoof;
   }
   // картонні коробки: стопки зі скотчем
   const cart = (x, z, w, d, h, y, r) => {
-    const b = box(w, h, d, carton, W - x, F + y + h / 2, z, kb); b.rotation.y = r;
-    const t = box(w * 0.18, 0.004, d + 0.004, tape, W - x, F + y + h + 0.001, z, kb); t.rotation.y = r;
+    const b = box(w, h, d, carton, mx(x), F + y + h / 2, z, kb); b.rotation.y = r;
+    const t = box(w * 0.18, 0.004, d + 0.004, tape, mx(x), F + y + h + 0.001, z, kb); t.rotation.y = r;
   };
   for (const [x, z, w, d, h, y, r] of [
     [4.15, 0.65, 0.6, 0.5, 0.4, 0, 0.05], [4.15, 0.65, 0.55, 0.45, 0.35, 0.4, -0.1], [4.15, 0.65, 0.5, 0.4, 0.3, 0.75, 0.08],
@@ -1650,7 +1691,7 @@ let kRoof;
     gro(gx, pz0 + 0.04, gx > hx - 5 ? entryZ - w / 2 : pz0 - bw);   // північний бік: від труби в бік газону (біля доріжки — крізь усю заливку)
     gro(gx, pz1 - 0.04, pz1 + bw);                         // з боку вулиці
   }
-  const tz1 = 20;                                                                                      // колії вздовж смуги проїзду
+  const tz1 = house.position[1] - house.d - 0.2;                                                  // колії вздовж смуги проїзду: до північних граней стін хати й літньої кухні (z 23.8)
   for (const s of [-1, 1]) box(0.6, 0.04, gz - tz1, concrete, plot.gate.x + s * 0.8, y, (gz + tz1) / 2);
 })();
 
@@ -1663,11 +1704,13 @@ let kRoof;
 (function buildCar() {
   const car = new THREE.Group();
   const paint = new THREE.MeshPhysicalMaterial({ color: 0x23282f, roughness: 0.4, metalness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.2 });
-  const glassM = new THREE.MeshStandardMaterial({ color: 0x151d24, roughness: 0.1, metalness: 0.2 });
+  const glassM = new THREE.MeshStandardMaterial({ color: 0x151d24, roughness: 0.1, metalness: 0.2, side: THREE.DoubleSide });
   const black = new THREE.MeshStandardMaterial({ color: 0x0b0c0e, roughness: 0.6 });
   const tyre = new THREE.MeshStandardMaterial({ color: 0x1a1a1b, roughness: 0.95 });
   const alloy = new THREE.MeshStandardMaterial({ color: 0xc9ced2, roughness: 0.35, metalness: 0.2 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xd8dde0, roughness: 0.2, metalness: 0.8 });
   const headM = new THREE.MeshStandardMaterial({ color: 0xe8eef2, roughness: 0.2, emissive: 0x6a7075, emissiveIntensity: 0.4 });
+  const amberM = new THREE.MeshStandardMaterial({ color: 0xd88a20, roughness: 0.3, emissive: 0x6a3a08, emissiveIntensity: 0.5 });
   const tailM = new THREE.MeshStandardMaterial({ color: 0xb01818, roughness: 0.3, emissive: 0x500808, emissiveIntensity: 0.6 });
   const plateM = new THREE.MeshStandardMaterial({ color: 0xf2f0e8, roughness: 0.5 });
   const add = (geo, m, x, y, z) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.castShadow = true; car.add(o); return o; };
@@ -1690,47 +1733,86 @@ let kRoof;
     geo.computeVertexNormals();
     return geo;
   };
-  // кузов: профіль збоку з арками під колеса, видавлений на ширину з великими фасками
-  const xf = 1.29, xr = -1.40, ar = 0.38;
+  const shape = pts => new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1])));
+  // нижня частина кузова: профіль збоку з арками, коротким капотом і майже вертикальними задніми дверима (колісна база 2.69 м)
+  const xf = 1.35, xr = -1.34, ar = 0.38;
   const pts = [[-2.10, 0.30], [xr - ar, 0.30]];
   for (let i = 0; i <= 12; i++) { const t = Math.PI - Math.PI * i / 12; pts.push([xr + ar * Math.cos(t), 0.31 + ar * Math.sin(t)]); }
   pts.push([xr + ar, 0.30], [xf - ar, 0.30]);
   for (let i = 0; i <= 12; i++) { const t = Math.PI - Math.PI * i / 12; pts.push([xf + ar * Math.cos(t), 0.31 + ar * Math.sin(t)]); }
-  pts.push([xf + ar, 0.30], [2.10, 0.30], [2.12, 0.52], [2.08, 0.78], [1.55, 0.92], [1.05, 0.98], [-1.95, 1.02], [-2.08, 0.95], [-2.12, 0.60]);
+  pts.push([xf + ar, 0.30], [2.10, 0.30], [2.13, 0.52], [2.11, 0.74], [2.04, 0.82], [1.50, 0.91], [1.02, 1.00], [-2.00, 1.00], [-2.10, 0.95], [-2.13, 0.60]);
   const body = new THREE.Mesh(
-    tumble(new THREE.ExtrudeGeometry(new THREE.Shape(chaikin(pts, 2).map(p => new THREE.Vector2(p[0], p[1]))), { depth: 1.5, bevelEnabled: true, bevelThickness: 0.16, bevelSize: 0.16, bevelOffset: -0.16, bevelSegments: 5, steps: 1 }), 0.1),
+    tumble(new THREE.ExtrudeGeometry(shape(chaikin(pts, 2)), { depth: 1.52, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.14, bevelOffset: -0.14, bevelSegments: 5, steps: 1 }), 0.08),
     paint);
-  body.geometry.translate(0, 0, -0.75);
+  body.geometry.translate(0, 0, -0.76);
   body.castShadow = true;
   car.add(body);
-  // салон: затоновані скло, вужче за кузов
-  const cabin = new THREE.Mesh(
-    tumble(new THREE.ExtrudeGeometry(new THREE.Shape(chaikin([[1.05, 0.96], [0.40, 1.56], [-1.75, 1.58], [-2.03, 1.01]], 3).map(p => new THREE.Vector2(p[0], p[1]))), { depth: 1.18, bevelEnabled: true, bevelThickness: 0.14, bevelSize: 0.12, bevelOffset: -0.12, bevelSegments: 4 }), 0.12),
-    glassM);
-  cabin.geometry.translate(0, 0, -0.59);
-  cabin.castShadow = true;
-  car.add(cabin);
-  add(new RoundedBoxGeometry(2.25, 0.07, 1.22, 3, 0.03), paint, -0.68, 1.6, 0).rotation.z = -0.005;   // дах
-  const seg = (x0, y0, x1, y1, z, t) => {                                                          // стійка між двома точками профілю
-    const len = Math.hypot(x1 - x0, y1 - y0);
-    const o = add(new THREE.BoxGeometry(len, t, 0.06), paint, (x0 + x1) / 2, (y0 + y1) / 2, z);
+  // верх кузова: високий дах, дуже похиле лобове скло, майже вертикальне заднє
+  const top = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(shape(chaikin([[1.02, 0.97], [0.20, 1.60], [-1.78, 1.60], [-2.02, 1.52], [-2.07, 0.97]], 2)), { depth: 1.44, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelOffset: -0.06, bevelSegments: 4 }),
+    paint);
+  top.geometry.translate(0, 0, -0.72);
+  top.castShadow = true;
+  car.add(top);
+  // скло: лобове і заднє — тонкі плити по схилу, бічні — плоскі контури на стінках
+  const pane = (x0, y0, x1, y1, w, off) => {                                                       // плита між двома точками профілю, зсунута назовні
+    const len = Math.hypot(x1 - x0, y1 - y0), nx = (y1 - y0) / len, ny = -(x1 - x0) / len;
+    const o = add(new THREE.BoxGeometry(len, 0.02, w), glassM, (x0 + x1) / 2 + nx * off, (y0 + y1) / 2 + ny * off, 0);
     o.rotation.z = Math.atan2(y1 - y0, x1 - x0);
+    return o;
   };
-  for (const z of [-0.74, 0.74]) {
-    add(new THREE.BoxGeometry(0.1, 0.1, 0.18), black, 0.98, 1.05, z * 1.3);                       // дзеркала
-    add(new THREE.BoxGeometry(3.3, 0.025, 0.012), alloy, -0.1, 0.62, z * 1.19);                   // хромована смужка по борту
-  }
-  // світло, решітка, номери, бампери
+  pane(0.97, 1.02, 0.25, 1.57, 1.40, 0.012);                                                     // лобове
+  pane(-2.02, 1.50, -2.07, 1.02, 1.12, 0.012);                                                    // заднє (нормаль уздовж -x)
+  const sideWin = (poly) => {
+    for (const z of [-0.785, 0.785]) {
+      const o = new THREE.Mesh(new THREE.ShapeGeometry(shape(poly)), glassM);
+      o.position.z = z;
+      car.add(o);
+    }
+  };
+  sideWin([[0.80, 1.04], [0.26, 1.54], [-0.36, 1.54], [-0.36, 1.04]]);                              // передні двері
+  sideWin([[-0.46, 1.04], [-0.46, 1.54], [-1.22, 1.54], [-1.30, 1.04]]);                            // задні двері
+  sideWin([[-1.40, 1.04], [-1.32, 1.54], [-1.80, 1.54], [-1.96, 1.04]]);                            // заднє бічне
+  sideWin([[0.98, 1.04], [0.88, 1.04], [0.34, 1.54], [0.30, 1.54]]);                                // трикутне біля стійки
+  // рейлінги на даху
   for (const z of [-0.6, 0.6]) {
-    add(new THREE.BoxGeometry(0.06, 0.14, 0.34), headM, 2.10, 0.74, z);
-    add(new THREE.BoxGeometry(0.05, 0.36, 0.14), tailM, -2.12, 0.92, z * 1.17);
+    add(new THREE.BoxGeometry(1.9, 0.03, 0.035), chrome, -0.75, 1.65, z);
+    for (const x of [0.05, -0.75, -1.55]) add(new THREE.BoxGeometry(0.05, 0.05, 0.05), black, x, 1.625, z);
   }
-  add(new THREE.BoxGeometry(0.05, 0.16, 0.7), black, 2.13, 0.56, 0);
-  add(new THREE.BoxGeometry(0.05, 0.1, 1.2), black, 2.13, 0.38, 0);
-  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, 2.16, 0.43, 0);
-  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, -2.16, 0.56, 0);
+  // шви дверей, ручки, дзеркала, пороги
+  for (const z of [-1, 1]) {
+    for (const x of [0.96, -0.44, -1.40]) add(new THREE.BoxGeometry(0.014, 0.30, 0.03), black, x, 0.86, z * 0.89);
+    for (const x of [0.12, -0.78]) add(new THREE.BoxGeometry(0.16, 0.025, 0.03), chrome, x, 0.90, z * 0.89);
+    add(new RoundedBoxGeometry(0.14, 0.1, 0.2, 2, 0.03), paint, 0.86, 1.08, z * 0.93);
+    add(new THREE.BoxGeometry(0.1, 0.07, 0.02), glassM, 0.86, 1.08, z * 1.03);
+    add(new THREE.BoxGeometry(1.8, 0.08, 0.04), black, 0, 0.33, z * 0.88);                          // пороги
+  }
+  // передок: фари в загнутих крилах, ромб, нижній повітрозабірник, протитуманки, номер
+  for (const z of [-1, 1]) {
+    add(new RoundedBoxGeometry(0.16, 0.13, 0.46, 2, 0.04), headM, 2.03, 0.78, z * 0.62).rotation.y = -z * 0.3;
+    add(new THREE.BoxGeometry(0.04, 0.04, 0.16), amberM, 2.095, 0.72, z * 0.74).rotation.y = -z * 0.5;
+    const fog = add(new THREE.CylinderGeometry(0.05, 0.05, 0.04, 14), headM, 2.12, 0.38, z * 0.66);
+    fog.rotation.z = Math.PI / 2;
+  }
+  add(new THREE.BoxGeometry(0.04, 0.05, 0.5), black, 2.13, 0.74, 0);                                // верхня решітка
+  add(new THREE.BoxGeometry(0.05, 0.12, 1.1), black, 2.14, 0.40, 0);                                // нижній повітрозабірник
+  add(new THREE.BoxGeometry(0.1, 0.07, 1.62), black, 2.06, 0.31, 0);                                // низ переднього бампера
+  const diamond = shape([[0, 0.09], [0.06, 0], [0, -0.09], [-0.06, 0]]);
+  const dFront = add(new THREE.ExtrudeGeometry(diamond, { depth: 0.02, bevelEnabled: false }), chrome, 2.13, 0.64, 0);
+  dFront.rotation.y = Math.PI / 2;
+  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, 2.155, 0.50, 0);
+  // корма: високі вертикальні ліхтарі по кутах, чорний низ бампера, номер, ромб, спойлер
+  for (const z of [-1, 1]) {
+    add(new RoundedBoxGeometry(0.12, 0.64, 0.18, 2, 0.04), tailM, -2.09, 1.12, z * 0.73);
+    add(new THREE.BoxGeometry(0.06, 0.14, 0.22), tailM, -2.15, 0.62, z * 0.7);
+  }
+  add(new THREE.BoxGeometry(0.1, 0.22, 1.8), black, -2.11, 0.44, 0);                                // задній бампер, чорний пластик
+  add(new THREE.BoxGeometry(0.02, 0.11, 0.52), plateM, -2.16, 0.74, 0);
+  const dRear = add(new THREE.ExtrudeGeometry(diamond, { depth: 0.02, bevelEnabled: false }), chrome, -2.14, 0.92, 0);
+  dRear.rotation.y = -Math.PI / 2;
+  add(new THREE.BoxGeometry(0.1, 0.05, 1.4), paint, -2.0, 1.60, 0).rotation.z = 0.2;               // спойлер над склом
   // колеса: шина, диск, п'ять спиць
-  for (const x of [xf, xr]) for (const z of [-0.76, 0.76]) {
+  for (const x of [xf, xr]) for (const z of [-0.78, 0.78]) {
     const w = new THREE.Group();
     w.position.set(x, 0.31, z);
     car.add(w);
@@ -1745,6 +1827,99 @@ let kRoof;
   car.rotation.y = Math.PI / 2;                                                                    // носом на північ, до хати
   scene.add(car);
   colliders.push({ minX: plot.gate.x - 0.95, maxX: plot.gate.x + 0.95, minZ: 36 - 2.2, maxZ: 36 + 2.2 });
+})();
+
+// мангал із кришкою на ніжках, з нижньою полицею, двома відкидними боковими столиками й казаном: стоїть збоку від тераси, на газоні за її західним краєм (клавіша G — відкрити/закрити кришку)
+let toggleGrillLid = () => {};
+(function buildGrill() {
+  const g = new THREE.Group();
+  g.position.set(-13.6, 0, 20.4);
+  g.rotation.y = Math.PI / 2;                                                    // довгою стороною вздовж z, передом (де стоять) до тераси
+  scene.add(g);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x1a1c1e, roughness: 0.55, metalness: 0.15 });
+  const coal = new THREE.MeshStandardMaterial({ color: 0x0a0a0b, roughness: 1 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0x8a8f94, roughness: 0.35, metalness: 0.4 });
+  const bx = (w, h, d, m, x, y, z, p = g) => box(w, h, d, m, x, y, z, p);
+  const L = 1.0, D = 0.4, BY0 = 0.72, BH = 0.2, T = 0.015;                      // корпус: довжина (x), глибина (z), низ і висота
+  // ніжки (з нахилом не робимо, прості квадратні профілі) і нижня полиця з планок
+  for (const x of [-L / 2 + 0.05, L / 2 - 0.05]) for (const z of [-D / 2 + 0.05, D / 2 - 0.05]) bx(0.035, BY0, 0.035, steel, x, BY0 / 2, z);
+  bx(L - 0.1, 0.02, 0.025, steel, 0, 0.26, D / 2 - 0.05); bx(L - 0.1, 0.02, 0.025, steel, 0, 0.26, -D / 2 + 0.05);
+  for (let i = 0; i < 9; i++) bx(0.04, 0.015, D - 0.1, steel, -L / 2 + 0.1 + i * (L - 0.2) / 8, 0.27, 0);
+  // корпус-ящик: стінки й дно, зверху відкритий
+  bx(L, T, D, steel, 0, BY0, 0);                                                // дно
+  bx(L, BH, T, steel, 0, BY0 + BH / 2, D / 2);                                  // передня
+  bx(L, BH, T, steel, 0, BY0 + BH / 2, -D / 2);                                 // задня
+  for (const s of [-1, 1]) bx(T, BH, D, steel, s * L / 2, BY0 + BH / 2, 0);     // торці
+  bx(L - 0.04, 0.012, D - 0.04, coal, 0, BY0 + 0.03, 0);                        // вугілля внизу
+  for (let i = 0; i < 12; i++) bx(0.03, 0.03, T, steel, -L / 2 + 0.05 + i * 0.075, BY0 + BH + 0.012, D / 2);   // зубці під шампури
+  for (let i = 0; i < 12; i++) bx(0.03, 0.03, T, steel, -L / 2 + 0.05 + i * 0.075, BY0 + BH + 0.012, -D / 2);
+  // решітка-гриль уздовж z у лівій частині й казан у правій (над якими перегородка)
+  for (let i = 0; i < 9; i++) bx(0.006, 0.006, D - 0.06, metal, -L / 2 + 0.05 + i * 0.044, BY0 + BH - 0.03, 0);
+  bx(0.012, BH - 0.06, D - 0.04, steel, 0.15, BY0 + BH / 2 + 0.03, 0);
+  const cauldron = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.12, 0.05, 28), steel);
+  cauldron.position.set(0.32, BY0 + BH - 0.04, 0); cauldron.castShadow = true; g.add(cauldron);
+  const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 0.01, 28), coal);
+  hole.position.set(0.32, BY0 + BH - 0.012, 0); g.add(hole);
+  // бокові столики — рамки з планок на рівні верху корпусу, з гачками для кочерги й совка
+  for (const s of [-1, 1]) {
+    const x0 = s * (L / 2 + 0.16);
+    bx(0.3, 0.012, 0.02, steel, x0, BY0 + BH - 0.01, D / 2 - 0.02); bx(0.3, 0.012, 0.02, steel, x0, BY0 + BH - 0.01, -D / 2 + 0.02);
+    for (let i = 0; i < 4; i++) bx(0.03, 0.012, D - 0.04, steel, s * (L / 2 + 0.04 + i * 0.09), BY0 + BH - 0.01, 0);
+    bx(0.012, 0.28, 0.012, steel, s * (L / 2 + 0.28), BY0 + 0.04, D / 2 - 0.02);   // підвіс: кочерга/совок
+    bx(0.07, 0.12, 0.012, steel, s * (L / 2 + 0.28), BY0 - 0.14, D / 2 - 0.02);
+  }
+  // кришка: плита з бортиками, шарнір по задньому краю; зачинена лежить зверху, відкрита стоїть майже вертикально назад
+  const lid = new THREE.Group();
+  lid.position.set(0, BY0 + BH + 0.03, -D / 2 - 0.01);
+  g.add(lid);
+  bx(L + 0.02, 0.012, D + 0.03, steel, 0, 0, (D + 0.03) / 2, lid);               // плита
+  bx(L + 0.02, 0.045, 0.012, steel, 0, -0.025, D + 0.03, lid);                    // передній борт
+  for (const s of [-1, 1]) bx(0.012, 0.045, D + 0.03, steel, s * (L + 0.02) / 2, -0.025, (D + 0.03) / 2, lid);
+  bx(0.28, 0.02, 0.025, steel, 0, 0.04, D + 0.02, lid);                           // ручка
+  bx(0.02, 0.04, 0.02, steel, -0.12, 0.02, D + 0.02, lid); bx(0.02, 0.04, 0.02, steel, 0.12, 0.02, D + 0.02, lid);
+  let open = true;
+  const apply = () => { lid.rotation.x = open ? -Math.PI * 0.58 : 0; };
+  toggleGrillLid = () => { open = !open; apply(); };
+  apply();
+  colliders.push({ minX: g.position.x - D / 2 - 0.05, maxX: g.position.x + D / 2 + 0.05, minZ: g.position.z - L / 2 - 0.45, maxZ: g.position.z + L / 2 + 0.45 });
+})();
+
+// спортивний майданчик у дворі за терасою: темна рама 2.6 x 1.8 x 2.4 м із червоними щаблями-рукоходом зверху (як на фото-референсі),
+// а поруч окремо турнік і бруси; більше нічого
+(function buildPlayground() {
+  const g = new THREE.Group();
+  g.position.set(-7.5, 0, 16.5);
+  scene.add(g);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2f3438, roughness: 0.5, metalness: 0.1 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x8cc63f, roughness: 0.5, metalness: 0 });
+  const bx = (w, h, d, m, x, y, z) => box(w, h, d, m, x, y, z, g);
+  const rod = (m, r, len, axis, x, y, z) => {                                 // циліндр уздовж осі 'x' | 'y' | 'z'
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 10), m);
+    if (axis === 'x') o.rotation.z = Math.PI / 2; else if (axis === 'z') o.rotation.x = Math.PI / 2;
+    o.position.set(x, y, z);
+    o.castShadow = true;
+    g.add(o);
+    return o;
+  };
+  const post = (x, z, h) => {
+    bx(0.08, h, 0.08, steel, x, h / 2, z);
+    colliders.push({ minX: g.position.x + x - 0.06, maxX: g.position.x + x + 0.06, minZ: g.position.z + z - 0.06, maxZ: g.position.z + z + 0.06 });
+  };
+  const A = 1.3, B = 0.5, H = 2.4;
+  for (const x of [-A, A]) for (const z of [-B, B]) post(x, z, H);
+  for (const z of [-B, B]) bx(2 * A + 0.08, 0.06, 0.06, steel, 0, H, z);                   // поздовжні балки
+  for (const x of [-A, A]) bx(0.06, 0.06, 2 * B + 0.08, steel, x, H, 0);                    // поперечні
+  // верхній рукохід: зелені щаблі впоперек між поздовжніми балками
+  for (let i = 0; i < 9; i++) rod(green, 0.018, 2 * B, 'z', -A + 0.15 + i * 0.25, H + 0.02, 0);
+  // турнік окремо зліва: дві стійки й одна товста зелена труба
+  for (const z of [-0.8, 0.8]) post(-2.6, z, 2.3);
+  rod(green, 0.03, 1.7, 'z', -2.6, 2.25, 0);
+  // дитячий турнік: одна стійка спільна з великим (його стійка z -0.8), друга — нижча, за 1.2 м від неї
+  post(-2.6, -2.0, 1.4);
+  rod(green, 0.025, 1.2, 'z', -2.6, 1.3, -1.4);
+  // бруси перед рамою, паралельно її довгому боку (вздовж x): чотири стійки й дві товсті труби на висоті 1.1 м, між ними 50 см
+  for (const x of [-0.8, 0.8]) for (const z of [-0.25, 0.25]) post(x, -2.2 + z, 1.1);
+  for (const z of [-0.25, 0.25]) rod(green, 0.03, 1.8, 'x', 0, 1.12, -2.2 + z);
 })();
 
 function addCollider(minX, maxX, minZ, maxZ) {
@@ -1778,6 +1953,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') toggleRoof();
   if (e.code === 'KeyV') toggleMode();
   if (e.code === 'KeyO') toggleAllDoors();
+  if (e.code === 'KeyG') toggleGrillLid();
 });
 addEventListener('keyup', e => keys[e.code] = false);
 
@@ -2449,7 +2625,7 @@ renderer.setAnimationLoop(() => {
   }
 })();
 
-// дитяча спальня (Кімната 2, 5.9 x 4.2): два односпальні ліжка узголів'ям до південної стіни, дві окремі шафи-пенали
+// дитяча спальня (Кімната 2, 5.9 x 4.2): два односпальні ліжка узголів'ям до південної стіни, дві окремі шафи-пенали (по 1.2 м)
 // по кутах північної стіни, спільний робочий стіл 1.8 x 0.7 під вікном і два офісні крісла зі спинкою
 (function buildKidsRoom() {
   const g = houseGroup, base = FLOOR_Y;
@@ -2470,19 +2646,20 @@ renderer.setAnimationLoop(() => {
   };
   const N = 0.2, S = 4.425, W0 = 4.875, E0 = 10.8;                 // чисті поверхні стін кімнати
 
-  // --- шафи-пенали 0.6 x 0.55 x 2.5 в північних кутах (одна для кожного) ---
+  // --- шафи-пенали 1.2 x 0.55 x 2.5 в північних кутах (одна для кожного), два дверцят ---
   const pencil = (xa, xb, handleSide) => {
     const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), z0 = N, D = 0.55;
     blk(wood, x0 + 0.02, x1 - 0.02, 0, 0.1, z0, z0 + D - 0.02);
     blk(white, x0, x1, 0.1, 2.5, z0, z0 + D);
     const fz = z0 + D;
     blk(dark, x0, x1, 1.9, 1.904, fz, fz + 0.004);                  // шов антресолі
-    const hx = handleSide > 0 ? x1 - 0.045 : x0 + 0.035;
-    blk(dark, hx, hx + 0.01, 1.0, 1.4, fz, fz + 0.02);                // вертикальна ручка
+    const xm = (x0 + x1) / 2;
+    blk(dark, xm - 0.002, xm + 0.002, 0.1, 1.9, fz, fz + 0.004);       // шов між дверцятами
+    for (const hx of [xm - 0.045, xm + 0.035]) blk(dark, hx, hx + 0.01, 1.0, 1.4, fz, fz + 0.02);   // дві вертикальні ручки біля шва
     addCollider(x0, x1, z0, z0 + D);
   };
-  pencil(W0, W0 + 0.6, +1);
-  pencil(E0 - 0.6, E0, -1);
+  pencil(W0, W0 + 1.2, +1);
+  pencil(E0 - 1.2, E0, -1);
 
   // --- два односпальні ліжка 0.9 x 2.0, узголів'я до південної стіни ---
   const bed = (cx, blanketColor) => {
@@ -2872,3 +3049,4 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
