@@ -2223,6 +2223,111 @@ let toggleGrillLid = () => {};
   for (const z of [-0.25, 0.25]) rod(green, 0.03, 1.8, 'x', 0, 1.12, -2.2 + z);
 })();
 
+// дитячий спортивно-скелелазний комплекс із зварених сталевих труб у стилі рами, турніків і брусів (темна сталь + зелені щаблі), у ряд з ними на газоні:
+// опори вертикальні й вкопані в землю, як у турніка й брусів (без полозів і підкладок); зліва перекладина й дві гімнастичні кільця, посередині похила драбина
+// з мотузковою сіткою, поруч похила сталева панель із вирізами-«півмісяцями» і кольоровими зачіпками, праворуч бічна хвиляста панель, збоку гірка зі сталевим жолобом
+(function buildClimbingComplex() {
+  const g = new THREE.Group();
+  g.position.set(-3.7, 0, 14.3);                                    // у ряд із брусами (z ≈ 14.3) і рамою з турніком, зі східного боку від них
+  g.rotation.y = Math.PI;                                           // лицьовий бік (локальний +z: сітка, панель, гірка) дивиться у світовий -z, на майданчик
+  scene.add(g);
+  const steel = new THREE.MeshStandardMaterial({ color: 0x2f3438, roughness: 0.5, metalness: 0.1 });
+  const green = new THREE.MeshStandardMaterial({ color: 0x8cc63f, roughness: 0.5, metalness: 0 });
+  const slideM = new THREE.MeshStandardMaterial({ color: 0xc4cacf, roughness: 0.3, metalness: 0.6 });
+  const rope = new THREE.MeshStandardMaterial({ color: 0xe8dfc8, roughness: 0.9 });
+  const black = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+  const sheetM = new THREE.MeshStandardMaterial({ color: 0x3b4248, roughness: 0.55, metalness: 0.2 });
+  const Y = new THREE.Vector3(0, 1, 0);
+  const H = 2.1, PX = 1.35, PZ = 0.6, DUG = 0.4;                    // висота, половина ширини й глибини по осях стійок, глибина закопування
+  const between = (parent, geo, m, a, b) => {                       // тіло з одиничною віссю по y між двома точками
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), v = B.clone().sub(A), o = new THREE.Mesh(geo(v.length()), m);
+    o.position.copy(A).add(B).multiplyScalar(0.5);
+    o.quaternion.setFromUnitVectors(Y, v.normalize());
+    o.castShadow = o.receiveShadow = true; parent.add(o);
+    return o;
+  };
+  const tube = (parent, a, b, w = 0.07, m = steel) => between(parent, l => new THREE.BoxGeometry(w, l, w), m, a, b);   // квадратна труба
+  const rod = (parent, a, b, r, m = green) => between(parent, l => new THREE.CylinderGeometry(r, r, l, 10), m, a, b);   // кругла труба/мотузка
+  const bxm = (parent, w, h, d, m, x, y, z) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); o.castShadow = o.receiveShadow = true; parent.add(o); return o; };
+
+  // рама: чотири вертикальні стійки (нижні 40 см у землі), верхні балки, проміжні зв'язки на 0.9 м
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) tube(g, [sx * PX, -DUG, sz * PZ], [sx * PX, H, sz * PZ], 0.08);
+  for (const sz of [-1, 1]) tube(g, [-PX - 0.04, H, sz * PZ], [PX + 0.04, H, sz * PZ]);
+  for (const sx of [-1, 1]) {
+    tube(g, [sx * PX, H, -PZ], [sx * PX, H, PZ]);
+    tube(g, [sx * PX, 0.9, -PZ], [sx * PX, 0.9, PZ], 0.05);
+  }
+  colliders.push({ minX: g.position.x - 1.5, maxX: g.position.x + 1.5, minZ: g.position.z - 2.15, maxZ: g.position.z + 0.75 });   // з обертанням на 180° передня сторона дивиться у світовий -z
+
+  // перекладина зліва між лівими стійками
+  rod(g, [-PX, 1.75, -PZ], [-PX, 1.75, PZ], 0.03);
+  // гімнастичні кільця на чорних стропах під задньою балкою
+  for (const x of [-0.6, -0.2]) {
+    rod(g, [x, H, -PZ], [x, H - 0.55, -PZ], 0.007, black);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.013, 8, 24), slideM);
+    ring.position.set(x, H - 0.55 - 0.11, -PZ); ring.castShadow = true; g.add(ring);
+  }
+
+  // похила площина (драбина-сітка й панель): група з початком на верхній балці спереду, вісь -y іде вздовж схилу, +z — назовні від схилу;
+  // нижні кінці рейок трохи заглиблені в землю
+  const inc = new THREE.Group();
+  inc.position.set(0, H, PZ);
+  inc.rotation.x = -Math.atan2(1.0, H - 0.05);
+  g.add(inc);
+  const L = Math.hypot(1.0, H - 0.05), Lr = L + 0.2;
+  // драбина із сіткою: дві рейки, зелені щаблі через 0.3 м, мотузкова сітка по щаблях
+  for (const x of [-0.55, 0.05]) tube(inc, [x, 0, 0], [x, -Lr, 0], 0.06);
+  for (let t = 0.3; t < L - 0.05; t += 0.3) rod(inc, [-0.55, -t, 0], [0.05, -t, 0], 0.018);
+  for (const x of [-0.45, -0.3, -0.15]) rod(inc, [x, -0.05, 0.035], [x, -L + 0.05, 0.035], 0.007, rope);
+  for (let t = 0.15; t < L - 0.1; t += 0.3) rod(inc, [-0.55, -t, 0.035], [0.05, -t, 0.035], 0.007, rope);
+  // сталева панель із вирізами-півмісяцями над зачіпками, шахова розкладка зачіпок у два стовпці
+  const px0 = 0.2, px1 = 0.9;
+  for (const x of [px0, px1]) tube(inc, [x, 0, 0], [x, -Lr, 0], 0.06);
+  const shape = new THREE.Shape();
+  shape.moveTo(px0, 0); shape.lineTo(px1, 0); shape.lineTo(px1, -L); shape.lineTo(px0, -L); shape.lineTo(px0, 0);
+  const holds = [[0.7, 0.4], [0.4, 0.68], [0.7, 0.96], [0.4, 1.24], [0.7, 1.52], [0.4, 1.8]];
+  const pastel = [0x3bb3a8, 0xf2c14e, 0x8c7b6b, 0xe88c96, 0x7aa36a, 0xf08a3a];
+  holds.forEach(([x, d], i) => {
+    const hole = new THREE.Path();
+    hole.absellipse(x, -d + 0.07, 0.075, 0.045, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+    bxm(inc, 0.13, 0.04, 0.07, new THREE.MeshStandardMaterial({ color: pastel[i], roughness: 0.6 }), x, -d, 0.04);   // зачіпка під вирізом
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.01, 8), slideM); bolt.rotation.x = Math.PI / 2; bolt.position.set(x, -d, 0.078); inc.add(bolt);
+  });
+  const panel = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.012, bevelEnabled: false }), sheetM);
+  panel.position.z = -0.006; panel.castShadow = panel.receiveShadow = true;
+  inc.add(panel);
+
+  // бічна хвиляста панель праворуч між стійками: сталевий лист із трьома хвилястими прорізами
+  const ws = new THREE.Shape();
+  ws.moveTo(-0.54, 0.15); ws.lineTo(0.54, 0.15); ws.lineTo(0.54, 1.95); ws.lineTo(-0.54, 1.95); ws.lineTo(-0.54, 0.15);
+  for (const v0 of [0.55, 1.0, 1.45]) {
+    const p = new THREE.Path(), us = [];
+    for (let u = -0.42; u <= 0.421; u += 0.06) us.push(u);
+    us.forEach((u, i) => { const y = v0 + 0.07 + 0.04 * Math.sin(u * 9); if (i) p.lineTo(u, y); else p.moveTo(u, y); });
+    [...us].reverse().forEach(u => p.lineTo(u, v0 - 0.07 + 0.04 * Math.sin(u * 9)));
+    p.closePath();
+    ws.holes.push(p);
+  }
+  const wavy = new THREE.Mesh(new THREE.ExtrudeGeometry(ws, { depth: 0.012, bevelEnabled: false }), sheetM);
+  wavy.rotation.y = Math.PI / 2; wavy.position.x = PX; wavy.castShadow = wavy.receiveShadow = true;
+  g.add(wavy);
+
+  // гірка: майданчик на 1 м (стійки в землі), жолоб зі сталевого листа з бортиками, нижні опори в землі
+  const sx0 = -1.0;
+  bxm(g, 0.52, 0.04, 0.55, slideM, sx0, 1.0, -0.32);                 // майданчик
+  for (const dx of [-0.25, 0.25]) tube(g, [sx0 + dx, -DUG, -0.55], [sx0 + dx, 1.0, -0.55], 0.05);   // стійки майданчика ззаду
+  tube(g, [sx0 - 0.25, 1.0, -0.55], [-PX, 1.0, -0.55], 0.04);
+  const ang = Math.atan2(0.88, 2.05), sl = Math.hypot(0.88, 2.05);
+  const deck = new THREE.Group();
+  deck.position.set(sx0, 0.56, 0.975);
+  deck.rotation.x = ang;
+  g.add(deck);
+  bxm(deck, 0.5, 0.02, sl, slideM, 0, 0, 0);
+  for (const dx of [-0.26, 0.26]) bxm(deck, 0.03, 0.08, sl, slideM, dx, 0.04, 0);
+  for (const dx of [-0.25, 0.25]) tube(g, [sx0 + dx, -0.3, 1.95], [sx0 + dx, 0.15, 1.95], 0.04);   // нижні опори, вкопані
+})();
+
 function addCollider(minX, maxX, minZ, maxZ) {
   colliders.push(worldBox(minX, maxX, minZ, maxZ));
 }
@@ -3428,6 +3533,12 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
+
+
+
 
 
 

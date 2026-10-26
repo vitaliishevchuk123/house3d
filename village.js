@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Сусідні двори українського села вздовж вулиці: по 3 двори з боків від нашої ділянки на північному боці й 7 дворів навпроти.
 // Кожен двір 30 × 80 м: хата (шифер чи металочерепиця, побілені або цегляні стіни, віконниці), літня кухня, хлів із загоном, курник,
-// городи на більшу частину ділянки, плодові дерева, колодязь, дрова, копиця, мальви, собака в будці, кіт, кури, корови, свині, кози.
+// городи на більшу частину ділянки, плодові дерева, колодязь зі зрубом, ворітним колесом і відром, дрова, копиця, мальви, собака в будці, кіт, кури, корови, свині, кози.
 // Уся статична геометрія зливається в 5 мешів (за типом текстури), тварини — окремі меші, щоб трохи рухатись.
 //
 // Система координат двору: u — уздовж вулиці, v — від паркану вглиб двору (0 — лінія паркану, 80 — задній паркан).
@@ -252,13 +252,38 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
   function bales(u, v) {
     for (const [dx, dy, dz] of [[0, 0, 0], [0.95, 0, 0], [0.45, 0.45, 0], [0, 0, 0.55], [0.95, 0, 0.55], [0.45, 0.45, 0.55]]) B(0.9, 0.42, 0.5, u + dx, 0.21 + dy, v + dz, 0xd0b455);
   }
-  function well(u, v) {                                        // колодязь-журавель
-    Cy(0.6, 0.6, 0.85, u, 0.42, v, 0x9a9c97, { seg: 12 }); Cy(0.42, 0.42, 0.05, u, 0.84, v, 0x1a1d22, { seg: 12 });
-    B(0.18, 3.5, 0.18, u - 1.9, 1.75, v, 0x6a4a30);
-    B(5.2, 0.1, 0.1, u - 1.9 + 0.9, 3.6, v, 0x6a4a30, { rz: 0.2 });
-    B(0.5, 0.35, 0.35, u - 1.9 - 1.45, 3.0, v, 0x777a76);
-    B(0.015, 2.6, 0.015, u + 0.5, 2.55, v, 0x333333); Cy(0.12, 0.1, 0.22, u + 0.5, 1.2, v, 0x6b6e72);
-    colliders.push({ ...ww(u, v, 0.8) });
+  function well(u, v) {                                        // колодязь із кам'яним кільцем, дерев'яним навісом-двосхилком, воротом-колесом, ланцюгом і відром
+    const wood = 0x4a3225, stones = [0x9a978f, 0x85827b, 0xa8a59c, 0x77746d, 0x8f8c84], hsh = i => (((i + 1) * 2654435761) >>> 0) / 4294967296;
+    at(u, v, 0, () => {
+      // кам'яне кільце: три ряди нетесаних каменів, верхні зміщені на пів-каменя, всередині заповнення
+      Cy(0.56, 0.56, 0.9, 0, 0.45, 0, 0x6e6b64, { seg: 14 });
+      const n = 13;
+      for (let row = 0; row < 3; row++) for (let i = 0; i < n; i++) {
+        const a = (i + (row % 2 ? 0.5 : 0)) * 2 * Math.PI / n, k = row * n + i;
+        B(0.29 + hsh(k) * 0.07, 0.27 + hsh(k + 50) * 0.04, 0.2 + hsh(k + 99) * 0.05, Math.cos(a) * 0.58, 0.15 + row * 0.3, Math.sin(a) * 0.58, stones[(k * 7) % 5], { ry: -(a + Math.PI / 2) });
+      }
+      Cy(0.74, 0.74, 0.08, 0, 0.94, 0, wood, { seg: 14 });          // дерев'яний вінець
+      Cy(0.38, 0.38, 0.02, 0, 0.99, 0, 0x14110e, { seg: 12 });      // темний отвір
+      // плоскі камені навколо основи
+      for (let i = 0; i < 10; i++) {
+        const a = i * 0.63 + hsh(i) * 0.3, r = 1.0 + hsh(i + 20) * 0.45;
+        B(0.34 + hsh(i + 5) * 0.2, 0.05, 0.3 + hsh(i + 9) * 0.15, Math.cos(a) * r, 0.02, Math.sin(a) * r, stones[i % 5], { ry: hsh(i + 30) * 3 });
+      }
+      // дві стійки, поперечна балка з ворітним валом і колесо зі спицями справа
+      for (const sx of [-1, 1]) B(0.13, 1.65, 0.13, sx * 0.5, 0.98 + 0.83, 0, wood);
+      B(1.2, 0.14, 0.14, 0, 2.05, 0, wood);
+      Cy(0.035, 0.035, 1.75, 0.1, 2.05, 0, 0x2a2a2a, { rz: Math.PI / 2 });
+      const wg = new THREE.TorusGeometry(0.22, 0.03, 6, 18); wg.rotateY(Math.PI / 2); wg.translate(0.86, 2.05, 0); put('plain', wg, wood);
+      B(0.04, 0.44, 0.045, 0.86, 2.05, 0, wood); B(0.04, 0.045, 0.44, 0.86, 2.05, 0, wood);
+      Cy(0.06, 0.06, 0.08, 0.86, 2.05, 0, 0x2a2a2a, { rz: Math.PI / 2, seg: 8 });
+      // ланцюг (кілька ланок) і відро з металевими обручами
+      for (let i = 0; i < 5; i++) B(0.02, 0.07, i % 2 ? 0.02 : 0.035, 0, 1.97 - i * 0.075, 0, 0x333333);
+      Cy(0.15, 0.12, 0.3, 0, 1.45, 0, 0x8a6a45, { seg: 10, rz: 0.2 });
+      for (const y of [1.55, 1.36]) Cy(0.152, 0.152, 0.025, 0 + (1.45 - y) * 0.2, y, 0, 0x2a2a2a, { seg: 10, rz: 0.2 });
+      // навіс: двосхилий дах із темних дощок, хребет уздовж вала; низ даху на стійках
+      gable(1.6, 1.2, 2.5, 0.55, 0.35, 0x3d2a1e, 0x4a3225, 'plank');
+      col(1.9, 1.9);
+    });
   }
   function laundry(u, v, r) {
     for (const s of [-1, 1]) B(0.09, 2.2, 0.09, u + s * 2.2, 1.1, v, C.wood);
@@ -461,6 +486,69 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
     return m;
   }
 
+  // ---------- електроввід у хату ----------
+  // дріт від найближчого стовпа ЛЕП на вулиці йде на гак-ізолятор у щипці хати (з лічильником на стіні під ним); якщо хата далеко від вулиці або стовп стоїть
+  // навпроти самої хати (дріт перетнув би дах), біля хати ставимо ще один стовп, а від нього вже короткий дріт на гак
+  const poleZ = plot.d / 2 + 1.8, poles = [-100, -60, -20, 20, 60, 100];   // північне узбіччя (наш бік)
+  const poleZS = street.z0 + street.w + 1.2, polesS = [-80, -40, 0, 40, 80];   // південне узбіччя: свої стовпи, щоб дроти не перетинали дорогу (висока техніка)
+  const rowOf = side => side === "N" ? { z: poleZ, xs: poles } : { z: poleZS, xs: polesS };
+  function seg3(a, b, r, color) {                                           // тонкий циліндр між двома довільними точками світу
+    const A = new THREE.Vector3(...a), Bv = new THREE.Vector3(...b), v = Bv.clone().sub(A), m = A.clone().add(Bv).multiplyScalar(0.5);
+    const g = new THREE.CylinderGeometry(r, r, v.length(), 5);
+    g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize()));
+    g.translate(m.x, m.y, m.z);
+    put('plain', g, color);
+  }
+  function sagWire(a, b, r = 0.017) {                                       // провід із провисом ~3 % довжини
+    const A = new THREE.Vector3(...a), Bv = new THREE.Vector3(...b), len = A.distanceTo(Bv), N = Math.max(4, Math.round(len / 1.5)), sag = len * 0.03;
+    let prev = null;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, p = A.clone().lerp(Bv, t);
+      p.y -= sag * 4 * t * (1 - t);
+      if (prev) seg3(prev.toArray(), p.toArray(), r, 0x1a1a1a);
+      prev = p;
+    }
+  }
+  function planService(Mh, hw, hd, row) {                                        // який кінець хати й від якого стовпа; чи треба свій стовп
+    const W = (x, y, z) => new THREE.Vector3(x, y, z).applyMatrix4(Mh);
+    let best = null;
+    for (const e of [-1, 1]) {
+      const tip = W(e * (hw / 2 + 0.55), 3.7, 0), base = W(e * hw / 2, 3.7, 0);
+      for (const px of row.xs) { const d = Math.hypot(tip.x - px, tip.z - row.z); if (!best || d < best.d) best = { e, tip, base, px, pz: row.z, d }; }
+    }
+    const xs = [-1, 1].flatMap(sx => [-1, 1].map(sz => W(sx * hw / 2, 0, sz * hd / 2).x));
+    best.direct = best.d <= 14 && (best.px < Math.min(...xs) - 0.5 || best.px > Math.max(...xs) + 0.5);
+    return best;
+  }
+  function drawService(plan, Mh, hw, hd, Gy, reserve) {
+    const W = (x, y, z) => new THREE.Vector3(x, y, z).applyMatrix4(Mh);
+    const sT = T, sG = G;
+    T = new THREE.Matrix4(); G = new THREE.Matrix4();                       // далі малюємо у світових координатах
+    const { tip, base, e } = plan, dirv = tip.clone().sub(base).normalize(), back = tip.clone().addScaledVector(dirv, -0.05);
+    seg3(base.toArray(), tip.toArray(), 0.014, 0x8f959a);                   // гак зі сталевого стрижня
+    seg3(back.toArray(), tip.toArray(), 0.035, 0xe8e8e2);                   // білий ізолятор-котушка
+    const S = [plan.px, 6.8, plan.pz];
+    if (plan.direct) sagWire(S, tip.toArray());
+    else {
+      const P = W(e * (hw / 2 + 1.6), 0, -(hd / 2 + 1.5));                  // власний стовп перед кутом хати, трохи осторонь кінця
+      B(0.2, 6.4, 0.2, P.x, 3.2, P.z, 0x9a9a95); B(0.1, 0.1, 1.2, P.x, 6.0, P.z, 0x6a4a30);
+      for (const dz of [-0.45, 0.45]) Cy(0.04, 0.04, 0.14, P.x, 6.15, P.z + dz, 0xdddddd, { seg: 6 });
+      colliders.push({ minX: P.x - 0.2, maxX: P.x + 0.2, minZ: P.z - 0.2, maxZ: P.z + 0.2 });
+      sagWire(S, [P.x, 6.2, P.z]);                                          // від вуличного стовпа на власний
+      sagWire([P.x, 6.1, P.z], tip.toArray());                              // і короткий дріт від нього на гак
+      const Pl = P.clone().applyMatrix4(Gy.clone().invert());
+      reserve(Pl.x, Pl.z, 1.0, 1.0);
+    }
+    T = sT; G = sG;
+  }
+  function meterAt(e, hw, hd) {                                             // лічильник на торцевій стіні у кутку (у системі хати), під гаком
+    const x = e * (hw / 2 + 0.07), grey = 0xc9cbcc;
+    B(0.14, 0.32, 0.22, x, 1.55, hd / 2 - 0.4, grey);
+    B(0.02, 0.26, 0.18, x + e * 0.08, 1.55, hd / 2 - 0.4, 0x9fb4bf, { kind: 'glass' });
+    Cy(0.055, 0.055, 0.01, x + e * 0.09, 1.6, hd / 2 - 0.4, 0xf2f0e8, { rz: Math.PI / 2, seg: 12 });
+    B(0.006, 0.03, 0.12, x + e * 0.095, 1.5, hd / 2 - 0.4, 0x1a1d20);
+  }
+
   // ---------- один двір ----------
   function buildYard(Y, idx) {
     const r = rng0(101 + idx * 77), pick = a => a[Math.floor(r() * a.length)];
@@ -490,6 +578,12 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
     });
     const hhu = (long ? hw : hd) / 2 + 1.2, hhv = (long ? hd : hw) / 2 + 1.5;
     reserve(cu, hv, hhu, hhv);
+    // електроввід: гак у щипці, лічильник на торці, стовп — власний або вуличний
+    const Mh = new THREE.Matrix4();
+    at(cu, hv, ry, () => Mh.copy(G).multiply(T));
+    const plan = planService(Mh, hw, hd, rowOf(Y.side));
+    at(cu, hv, ry, () => meterAt(plan.e, hw, hd));
+    drawService(plan, Mh, hw, hd, G.clone(), reserve);
     const frontV = hv - (long ? hd : hw) / 2, backV = hv + (long ? hd : hw) / 2;
 
     // шлях від ґанку до хвіртки, під'їзд до хліва
@@ -602,23 +696,24 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
   ];
   yards.forEach((Y, i) => { Y.gateU = Y.gs * 8; Y.frame = Y.wall === C.brick ? 0xf4f2ea : 0xf4f2ea; Y.sideE = Y.sideE ?? false; buildYard(Y, i); });
 
-  // ---------- стовпи ЛЕП вздовж вулиці з проводами, верби на узбіччі ----------
+  // ---------- стовпи ЛЕП вздовж вулиці: на кожному узбіччі свій ряд із проводами; дорогу дроти не перетинають, верби низькі й осторонь ----------
   G = new THREE.Matrix4(); T = new THREE.Matrix4();
-  const poleZ = plot.d / 2 + 1.8, poles = [-100, -60, -20, 20, 60, 100];
-  for (const x of poles) {
-    B(0.22, 7.2, 0.22, x, 3.6, poleZ, 0x9a9a95); B(0.1, 0.1, 1.8, x, 6.7, poleZ, 0x6a4a30); B(0.1, 0.1, 1.8, x, 6.0, poleZ, 0x6a4a30);
-    for (const z of [-0.8, 0, 0.8]) Cy(0.04, 0.04, 0.14, x, 6.8, poleZ + z, 0xdddddd, { seg: 6 });
-    colliders.push({ minX: x - 0.2, maxX: x + 0.2, minZ: poleZ - 0.2, maxZ: poleZ + 0.2 });
-  }
-  for (let i = 0; i < poles.length - 1; i++) for (const z of [-0.8, 0, 0.8]) {
-    const x0 = poles[i], x1 = poles[i + 1], N = 10, y = t => 6.8 - 0.7 * 4 * t * (1 - t);
-    for (let j = 0; j < N; j++) {
-      const a = j / N, b = (j + 1) / N, xa = x0 + (x1 - x0) * a, xb = x0 + (x1 - x0) * b;
-      B(Math.hypot(xb - xa, y(b) - y(a)), 0.014, 0.014, (xa + xb) / 2, (y(a) + y(b)) / 2, poleZ + z, 0x1a1a1a, { rz: Math.atan2(y(b) - y(a), xb - xa) });
+  for (const { z: pz, xs } of [rowOf('N'), rowOf('S')]) {
+    for (const x of xs) {
+      B(0.22, 7.2, 0.22, x, 3.6, pz, 0x9a9a95); B(0.1, 0.1, 1.8, x, 6.7, pz, 0x6a4a30); B(0.1, 0.1, 1.8, x, 6.0, pz, 0x6a4a30);
+      for (const z of [-0.8, 0, 0.8]) Cy(0.04, 0.04, 0.14, x, 6.8, pz + z, 0xdddddd, { seg: 6 });
+      colliders.push({ minX: x - 0.2, maxX: x + 0.2, minZ: pz - 0.2, maxZ: pz + 0.2 });
+    }
+    for (let i = 0; i < xs.length - 1; i++) for (const z of [-0.8, 0, 0.8]) {
+      const x0 = xs[i], x1 = xs[i + 1], N = 10, y = t => 6.8 - 0.7 * 4 * t * (1 - t);
+      for (let j = 0; j < N; j++) {
+        const a = j / N, b = (j + 1) / N, xa = x0 + (x1 - x0) * a, xb = x0 + (x1 - x0) * b;
+        B(Math.hypot(xb - xa, y(b) - y(a)), 0.014, 0.014, (xa + xb) / 2, (y(a) + y(b)) / 2, pz + z, 0x1a1a1a, { rz: Math.atan2(y(b) - y(a), xb - xa) });
+      }
     }
   }
   const wr = rng0(9);
-  for (const x of [-96, -74, -45, -16, 14, 46, 73, 98]) tree(x, street.z0 + street.w + 1.6, 0.8 + wr() * 0.4, 'willow', wr);
+  for (const x of [-96, -68, -45, -22, 14, 46, 73, 98]) tree(x, street.z0 + street.w + 2.7, 0.55 + wr() * 0.2, 'willow', wr);   // нижче проводів (≈4.5 м) і осторонь їх лінії
 
   // ---------- збираємо меші ----------
   for (const k of Object.keys(L)) {
