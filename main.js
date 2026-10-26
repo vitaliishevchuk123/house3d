@@ -5,6 +5,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { feature } from 'topojson-client';
 import { plot, house, walls, floors, ceilingDrop } from './plan.js';
+import { buildVillage } from './village.js';
 
 // ---------- сцена ----------
 const scene = new THREE.Scene();
@@ -140,6 +141,9 @@ const STREET = { z0: plot.d / 2 + 3, w: 7 };            // 3 м газону в�
   road.receiveShadow = true;
   scene.add(road);
 })();
+
+// сусідні двори українського села по обидва боки вулиці
+const village = buildVillage({ scene, plot, street: STREET, colliders, grassTex: gt });
 
 function box(w, h, d, material, x, y, z, parent = scene) {
   const geo = new THREE.BoxGeometry(w, h, d);
@@ -2344,6 +2348,19 @@ const clock = new THREE.Clock();
 const dir = new THREE.Vector3();
 
 function update(dt) {
+  if (mode === 'orbit') {                                        // WASD у режимі зверху: камера й точка погляду їдуть по землі разом
+    const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), r = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+    if (f || r) {
+      camera.getWorldDirection(dir);
+      dir.y = 0; dir.normalize();
+      const sp = Math.max(8, camera.position.distanceTo(orbit.target)) * (keys.ShiftLeft ? 1.2 : 0.5) * dt;
+      const mx = (dir.x * f - dir.z * r) * sp, mz = (dir.z * f + dir.x * r) * sp;
+      camera.position.x += mx; camera.position.z += mz;
+      orbit.target.x += mx; orbit.target.z += mz;
+      orbit.update();
+    }
+    return;
+  }
   if (mode !== 'walk' || !(walk.isLocked || isTouch)) return;
   const speed = (keys.ShiftLeft ? 5 : 2.2) * dt;
   const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - stick.y;
@@ -2356,16 +2373,18 @@ function update(dt) {
   const dz = (dir.z * f + dir.x * r) * speed;
 
   const p = camera.position;
-  const lim = (v, half) => Math.max(-half + 0.3, Math.min(half - 0.3, v));
+  // ходимо по своїй ділянці, через хвіртку — на вулиці (смуги газону з обох боків); у двори сусідів не пускаємо
+  const inGate = x => Math.abs(x - plot.wicket.x) < plot.wicket.width / 2 - 0.25;
+  const walkable = (x, z) => {
+    const inPlot = Math.abs(x) <= plot.w / 2 - 0.3 && Math.abs(z) <= plot.d / 2 - 0.3;
+    const onStreet = z >= plot.d / 2 + 0.3 && z <= STREET.z0 + STREET.w + 2.7 && Math.abs(x) <= 120;
+    return inPlot || onStreet || (inGate(x) && Math.abs(z - plot.d / 2) <= 0.4);
+  };
   // окремо по осях — щоб ковзати вздовж стін
   const nx = p.x + dx;
-  if (!collides(nx, p.z)) p.x = nx;
+  if (!collides(nx, p.z) && walkable(nx, p.z)) p.x = nx;
   const nz = p.z + dz;
-  if (!collides(p.x, nz)) p.z = nz;
-  // не виходимо за межі ділянки (крім воріт)
-  const inGate = Math.abs(p.x - plot.wicket.x) < plot.wicket.width / 2 - 0.25;
-  p.x = lim(p.x, plot.w);
-  p.z = inGate ? Math.min(p.z, plot.d / 2 + 30) : lim(p.z, plot.d);
+  if (!collides(p.x, nz) && walkable(p.x, nz)) p.z = nz;
   p.y = EYE;
 }
 
@@ -2379,6 +2398,7 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
   update(dt);
   updateDoors(dt);
+  village.update(clock.elapsedTime);
   renderer.render(scene, camera);
 });
 
@@ -3216,16 +3236,23 @@ renderer.setAnimationLoop(() => {
   // розширювальний бак (червоний) збоку на стіні
   put(new THREE.CylinderGeometry(0.1, 0.1, 0.28, 18), red, 0.32, 1.3, 0.12);
   put(new THREE.SphereGeometry(0.1, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), red, 0.32, 1.44, 0.12);
-  // коаксіальний димохід: від верху котла вгору й горизонтально на двір через східну стіну
-  put(new THREE.CylinderGeometry(0.045, 0.045, 0.35, 14), grey, 0, 1.97, 0.15);
-  const flue = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 11.25 - bx, 14), grey);
+  // коаксіальний димохід: від верху котла вгору (під самою стелею, щоб на вході не чіпляв наличник дверей), горизонтально на двір через східну стіну,
+  // а надворі — вертикальна труба вздовж щипця вище за хребет даху, з кронштейнами до стіни й ковпаком-дефлектором
+  const FY = 2.45, FX = 11.9 - bx, TOP = 5.35;                                                  // FY — висота горизонталі від підлоги котельні; FX — труба надворі, за звисом даху
+  put(new THREE.CylinderGeometry(0.045, 0.045, FY - 1.8, 14), grey, 0, (FY + 1.8) / 2, 0.15);
+  const flue = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, FX, 14), grey);
   flue.rotation.z = Math.PI / 2;
-  flue.position.set((11.25 - bx) / 2, 2.15, 0.15);
+  flue.position.set(FX / 2, FY, 0.15);
   boiler.add(flue);
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 14), dark);       // ковпак на фасаді
-  cap.rotation.z = Math.PI / 2;
-  cap.position.set(11.27 - bx, 2.15, 0.15);
-  boiler.add(cap);
+  put(new THREE.SphereGeometry(0.056, 12, 10), grey, FX, FY, 0.15);                             // коліно надворі
+  put(new THREE.CylinderGeometry(0.045, 0.045, TOP - FY, 14), grey, FX, (FY + TOP) / 2, 0.15);  // стояк угору
+  for (const y of [3.4, 4.3]) {                                                                 // кронштейни: штанга від стіни й хомут на трубі
+    const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, FX - (11.0 - bx), 8), dark);
+    rod.rotation.z = Math.PI / 2; rod.position.set((FX + 11.0 - bx) / 2, y, 0.15); boiler.add(rod);
+    put(new THREE.CylinderGeometry(0.06, 0.06, 0.035, 14), dark, FX, y, 0.15);
+  }
+  put(new THREE.CylinderGeometry(0.065, 0.065, 0.12, 14), dark, FX, TOP + 0.04, 0.15);          // оголовок
+  put(new THREE.ConeGeometry(0.11, 0.07, 14), dark, FX, TOP + 0.13, 0.15);                       // дефлектор-парасолька
 })();
 
 // газопостачання: від вулиці газ іде під землею, біля котельні труба виходить на поверхню (кран, лічильник),
@@ -3275,6 +3302,60 @@ renderer.setAnimationLoop(() => {
   valve(px, base + 0.65, hz);
   elbow(px, base + 0.4, hz);
   pipe([px, base + 0.4, hz], [8.6, base + 0.4, hz]);
+})();
+
+// електроввід: дріт (СІП) від стовпа ЛЕП на вулиці йде на гак-ізолятор у щипці східної стіни під звисом даху; під ним коробка з пробками,
+// далі кабель іде в штробі під штукатуркою до електролічильника на стіні, а пробки стоять у котельні; ззовні кабелю не видно
+(function buildPowerService() {
+  const pole = village.pole;
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8f959a, roughness: 0.5, metalness: 0.5 });
+  const wireM = new THREE.MeshStandardMaterial({ color: 0x15171a, roughness: 0.6 });
+  const white = new THREE.MeshStandardMaterial({ color: 0xe8e8e2, roughness: 0.5 });
+  const lz = 3.85;                                                         // вертикаль вводу на стіні (локальні координати хати): гак, пробки й лічильник одна під одною
+  const wx = 11.27, hookY = 4.1, hookX = 11.75;                            // гак у щипці виходить із площини щипця (x = 11.0, вона на 20 см глибше за нижню стіну) за звис даху (до 11.5)
+  const tip = new THREE.Vector3(house.position[0] - hookX, hookY, house.position[1] - lz);   // кінець гака у світі (хата повернута на 180°)
+  const seg = (a, b, r, m, parent = scene) => {
+    const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), v = B.clone().sub(A);
+    const o = new THREE.Mesh(new THREE.CylinderGeometry(r, r, v.length(), 8), m);
+    o.position.copy(A).add(B).multiplyScalar(0.5);
+    o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
+    o.castShadow = true;
+    parent.add(o);
+  };
+  const g = houseGroup;
+  // анкерний гак: сталевий стрижень із стіни й білий ізолятор-котушка на кінці
+  seg([11.0, hookY, lz], [hookX, hookY, lz], 0.014, steel, g);
+  const spool = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10), white);
+  spool.rotation.z = Math.PI / 2; spool.position.set(hookX - 0.02, hookY, lz); g.add(spool);
+  // дві жили СІП від ізолятора на стовпі до гака з невеликим провисом
+  const a = new THREE.Vector3(pole.x, pole.y, pole.z), N = 14, sag = 0.45;
+  for (const dz of [-0.03, 0.03]) {
+    let prev = null;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N, p = a.clone().lerp(tip, t);
+      p.y -= sag * 4 * t * (1 - t); p.z += dz;
+      if (prev) seg(prev.toArray(), p.toArray(), 0.014, wireM);
+      prev = p;
+    }
+  }
+  // щиток із пробками всередині котельні, на південній перегородці (z = 5.8) між котлом і дверима: сірий корпус, дві білі порцелянові пробки, чорна ручка вимикача
+  const grey = new THREE.MeshStandardMaterial({ color: 0xc9cbcc, roughness: 0.5 });
+  const fx = 10.1, fy = FLOOR_Y + 1.5, fz = 5.75;
+  box(0.2, 0.26, 0.1, grey, fx, fy, fz, g);
+  for (const dx of [-0.045, 0.045]) {
+    const f = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.03, 12), white);
+    f.rotation.x = Math.PI / 2; f.position.set(fx + dx, fy + 0.05, fz - 0.062); g.add(f);
+  }
+  box(0.05, 0.03, 0.04, new THREE.MeshStandardMaterial({ color: 0x1a1d20 }), fx, fy - 0.06, fz - 0.065, g);
+  // лічильник: сірий щиток з прозорою кришкою, диск-індикатор і цифри
+  const my = 1.55;
+  box(0.14, 0.34, 0.22, grey, wx, my, lz, g);
+  box(0.02, 0.26, 0.18, new THREE.MeshStandardMaterial({ color: 0x9fb4bf, transparent: true, opacity: 0.55, roughness: 0.1 }), wx + 0.08, my, lz, g);
+  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.01, 16), white);
+  face.rotation.z = Math.PI / 2; face.position.set(wx + 0.071, my + 0.05, lz); g.add(face);
+  const disc = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.012, 0.07), new THREE.MeshStandardMaterial({ color: 0xc02a1c })); disc.position.set(wx + 0.078, my + 0.05, lz); g.add(disc);
+  box(0.006, 0.03, 0.12, new THREE.MeshStandardMaterial({ color: 0x1a1d20 }), wx + 0.076, my - 0.07, lz, g);   // рядок цифр
+  box(0.06, 0.05, 0.03, new THREE.MeshStandardMaterial({ color: 0x3d7f3d }), wx + 0.08, my - 0.12, lz + 0.07, g);   // пломба
 })();
 
 // бойлер непрямого нагріву (накопичувальний водонагрівач 100 л) у котельні поруч з газовим котлом: стоїть на підлозі біля стіни
@@ -3347,6 +3428,11 @@ renderer.setAnimationLoop(() => {
     t0 = null;
   });
 })();
+
+
+
+
+
 
 
 
