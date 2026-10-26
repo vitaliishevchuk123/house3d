@@ -548,6 +548,27 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
     Cy(0.055, 0.055, 0.01, x + e * 0.09, 1.6, hd / 2 - 0.4, 0xf2f0e8, { rz: Math.PI / 2, seg: 12 });
     B(0.006, 0.03, 0.12, x + e * 0.095, 1.5, hd / 2 - 0.4, 0x1a1d20);
   }
+  function gasAt(e, hw, hd) {                                               // газ як у нас: труба виходить із землі між вікнами торця хати, кран, лічильник і в стіну (у системі хати)
+    const x = e * (hw / 2 + 0.2), z = 0, yel = 0xe8b820;
+    B(0.3, 0.08, 0.3, x, 0.04, z, C.concrete);                              // бетонна плитка навколо виходу
+    Cy(0.017, 0.017, 1.8, x, 0.9, z, yel, { seg: 8 });                      // жовта труба з землі
+    B(0.08, 0.05, 0.05, x, 0.95, z, yel); B(0.1, 0.015, 0.02, x, 0.99, z, 0xc03a2b);   // відключний кран із червоною ручкою
+    B(0.14, 0.3, 0.22, x, 1.5, z, 0xb9bcbe);                                // лічильник газу
+    B(0.012, 0.05, 0.12, x + e * 0.071, 1.55, z, 0x303535);
+    Sp(0.021, x, 1.8, z, yel);                                             // коліно й вихід у стіну
+    Cy(0.017, 0.017, 0.2 - 0.03, x - e * 0.1, 1.8, z, yel, { rz: Math.PI / 2, seg: 8 });
+  }
+  function woodHeatAt(e, hw, hd) {                                          // піч на дровах: біля торця складені дрова, колода-колун із сокирою, тріски
+    const x = e * (hw / 2 + 0.55), z = hd / 2 - 1.6;
+    for (let row = 0; row < 5; row++) for (let i = 0; i < 9 - row; i++)
+      Cy(0.075, 0.075, 0.55, x, 0.08 + row * 0.14, z - 0.8 + i * 0.17 + row * 0.085, row % 2 ? 0x9a7a52 : 0x7d5e3c, { rz: Math.PI / 2, seg: 6 });
+    for (const dz of [-1.0, 1.0]) for (const dx of [-0.28, 0.28]) B(0.07, 0.8, 0.07, x + dx, 0.4, z + dz, C.wood);   // стійки дровітні
+    const bx = e * (hw / 2 + 1.7), bz = z + 1.8;   // колода-колун і сокира
+    Cy(0.22, 0.24, 0.42, bx, 0.21, bz, 0x7a5a3a, { seg: 9 });
+    B(0.03, 0.4, 0.03, bx, 0.62, bz, C.wood, { rz: 0.5 }); B(0.12, 0.09, 0.015, bx - 0.09, 0.8, bz, 0x6e7478);
+    for (let i = 0; i < 9; i++) { const a = i * 2.4; Cy(0.04, 0.04, 0.22 + (i % 3) * 0.04, bx + Math.cos(a) * (0.5 + (i % 4) * 0.12), 0.04, bz + Math.sin(a) * (0.5 + (i % 3) * 0.15), i % 2 ? 0x9a7a52 : 0xb08a5a, { rx: Math.PI / 2, seg: 6 }); }
+    at(x, z, 0, () => col(0.9, 2.1));
+  }
 
   // ---------- один двір ----------
   function buildYard(Y, idx) {
@@ -582,7 +603,8 @@ export function buildVillage({ scene, plot, street, colliders, grassTex }) {
     const Mh = new THREE.Matrix4();
     at(cu, hv, ry, () => Mh.copy(G).multiply(T));
     const plan = planService(Mh, hw, hd, rowOf(Y.side));
-    at(cu, hv, ry, () => meterAt(plan.e, hw, hd));
+    const wood = Y.extra.includes('woodpile');                              // піч на дровах у дворах із дровітнею, решта на газу
+    at(cu, hv, ry, () => { meterAt(plan.e, hw, hd); if (wood) woodHeatAt(plan.e, hw, hd); else gasAt(plan.e, hw, hd); });
     drawService(plan, Mh, hw, hd, G.clone(), reserve);
     const frontV = hv - (long ? hd : hw) / 2, backV = hv + (long ? hd : hw) / 2;
 
